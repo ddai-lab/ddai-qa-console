@@ -136,7 +136,7 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
 
   // ── Acciones ────────────────────────────────────────────────────────────────
   async function act(key: string, url: string, body?: any) {
-    if (isCTO) { flash("El rol CTO sólo tiene visibilidad; no puede operar.", true); return; }
+    if (isCTO) { flash("La vista Métricas es solo lectura; cambia a QA agéntico para operar.", true); return; }
     setBusy(key);
     try {
       const res = await fetch(url, { method: "POST", headers, body: body ? JSON.stringify(body) : undefined });
@@ -190,7 +190,7 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
             <button key={r} onClick={() => setRole(r)} title={r === "CTO" ? "Solo lectura: KPIs y confianza" : "Vista operativa: dirige el flujo"} style={{
               fontFamily: MONO, fontSize: 10, padding: "5px 10px", cursor: "pointer", border: "none",
               background: role === r ? C.glow : "transparent", color: role === r ? C.accent : C.dim,
-            }}>{r === "CTO" ? "CTO" : "QA agéntico"}</button>
+            }}>{r === "CTO" ? "Métricas" : "QA agéntico"}</button>
           ))}
         </div>
       </div>
