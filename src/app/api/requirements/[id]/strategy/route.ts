@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getProvider } from "@/lib/ai";
 import type { Interpretation } from "@/lib/ai";
-import { resolveActor, denyIfNotOperator } from "@/lib/auth";
+import { resolveActor, denyIfNotOperator, resolveChannel } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { advancePhase } from "@/lib/phases";
 
@@ -60,10 +60,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     include: { decisions: { orderBy: { priority: "asc" } } },
   });
 
-  await advancePhase(requirement.id, "ANALYSIS", "DESIGN");
+  const channel = resolveChannel(req);
+  await advancePhase(requirement.id, "ANALYSIS", "DESIGN", channel);
   await audit({
     action: "strategy.generated",
     actorType: "AI",
+    channel,
     projectId: requirement.projectId,
     requirementId: requirement.id,
     payload: { model: provider.name, levels: result.decisions.map((d) => d.level) },

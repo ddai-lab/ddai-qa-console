@@ -34,6 +34,14 @@ export function resolveActor(req: Request): Actor {
   return { id: null, name: "QA (demo)", role: "QA_AGENTIC" };
 }
 
+export type Channel = "UI" | "VOICE" | "API" | "CI";
+
+// Canal por el que llega la acción (clic vs voz). La trazabilidad no se pierde por usar voz.
+export function resolveChannel(req: Request): Channel {
+  const c = (req.headers.get("x-beatrice-channel") || "").toUpperCase();
+  return c === "VOICE" || c === "API" || c === "CI" ? (c as Channel) : "UI";
+}
+
 const OPERATORS: Role[] = ["QA_AGENTIC", "PM", "DEVELOPER"];
 
 // Devuelve un mensaje de error si el actor NO puede operar; null si puede.

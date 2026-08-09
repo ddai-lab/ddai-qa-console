@@ -1,5 +1,6 @@
 "use client";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getRecognizer, getSpeaker } from "@/lib/voice";
 
 // ── Tema "centro de mando" · identidad Detrás del Algoritmo (azul-noche + gradientes) ──
 const C = {
@@ -104,10 +105,25 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
   const [toast, setToast] = useState<{ msg: string; err?: boolean } | null>(null);
   const [cmd, setCmd] = useState("");
   const [showCode, setShowCode] = useState<Record<string, boolean>>({});
+  const [listening, setListening] = useState(false);
+  const [speakOn, setSpeakOn] = useState(true);
+  const [voiceOk, setVoiceOk] = useState(false);
   const headers = useActor(role);
   const isCTO = role === "CTO";
+  const chan = useRef<"UI" | "VOICE">("UI"); // canal de la acción en curso (clic vs voz)
 
-  const flash = (msg: string, err = false) => { setToast({ msg, err }); setTimeout(() => setToast(null), 3200); };
+  const flash = (msg: string, err = false) => { setToast({ msg, err }); setTimeout(() => setToast(null), 4000); };
+  // Responde a la persona: toast + (si la voz está activa o vino por voz) lo dice en voz alta.
+  const respond = useCallback((msg: string, err = false) => {
+    flash(msg, err);
+    if (chan.current === "VOICE" || speakOn) getSpeaker().speak(msg);
+  }, [speakOn]);
+
+  useEffect(() => {
+    setVoiceOk(getRecognizer().supported() && getSpeaker().supported());
+    // Precarga las voces del navegador (algunas las cargan de forma diferida).
+    if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.getVoices();
+  }, []);
 
   const loadList = useCallback(async (s: string | null) => {
     if (!s) { setList([]); return; }
@@ -136,29 +152,48 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
 
   // ── Acciones ────────────────────────────────────────────────────────────────
   async function act(key: string, url: string, body?: any) {
-    if (isCTO) { flash("La vista Métricas es solo lectura; cambia a QA agéntico para operar.", true); return; }
+    if (isCTO) { respond("La vista Métricas es solo lectura; cambia a QA agéntico para operar.", true); return; }
     setBusy(key);
     try {
-      const res = await fetch(url, { method: "POST", headers, body: body ? JSON.stringify(body) : undefined });
+      const reqHeaders = { ...headers, "x-beatrice-channel": chan.current };
+      const payload = body ? { ...body, channel: chan.current } : undefined;
+      const res = await fetch(url, { method: "POST", headers: reqHeaders, body: payload ? JSON.stringify(payload) : undefined });
       const data = await res.json();
-      if (!res.ok) { flash(data.error || "Error", true); return; }
+      if (!res.ok) { respond(data.error || "Error", true); return; }
       await refresh();
       return data;
-    } catch (e: any) { flash(String(e?.message || e), true); }
+    } catch (e: any) { respond(String(e?.message || e), true); }
     finally { setBusy(null); }
   }
 
-  const analyze = () => selectedId && act("analyze", `/api/requirements/${selectedId}/analyze`).then((d) => d && flash("Análisis generado por IA — pendiente de tu validación"));
-  const strategy = () => selectedId && act("strategy", `/api/requirements/${selectedId}/strategy`).then((d) => d && flash("Estrategia (pirámide de Cohn) propuesta por IA"));
-  const implement = () => selectedId && act("implement", `/api/requirements/${selectedId}/implement`).then((d) => d && flash(`Código generado: ${d.artifacts?.length ?? 0} artefacto(s)`));
+  const analyze = () => selectedId && act("analyze", `/api/requirements/${selectedId}/analyze`).then((d) => {
+    if (!d) return;
+    const it = d.analysis?.interpretation || {};
+    const risk = it.dataSensitive ? " Atención: maneja datos sensibles." : "";
+    respond(`Análisis listo. Detecté ${(it.areas || []).join(", ") || "lógica de negocio"}.${risk} Pendiente de tu validación.`);
+  });
+  const strategy = () => selectedId && act("strategy", `/api/requirements/${selectedId}/strategy`).then((d) => {
+    if (!d) return;
+    const lv = (d.strategy?.decisions || []).map((x: any) => x.level).join(", ");
+    respond(`Estrategia propuesta según la pirámide de Cohn: ${lv}. Apruébala para continuar.`);
+  });
+  const implement = () => selectedId && act("implement", `/api/requirements/${selectedId}/implement`).then((d) => {
+    if (!d) return;
+    respond(`Generé ${d.artifacts?.length ?? 0} artefacto(s) de prueba. Revísalos y valídalos.`);
+  });
   const validate = (kind: string, id: string, status: Status, note?: string) =>
-    act(`v-${id}`, `/api/validate`, { kind, id, status, note }).then((d) => d && flash(`${kind} → ${status.toLowerCase()}`));
+    act(`v-${id}`, `/api/validate`, { kind, id, status, note }).then((d) => {
+      if (!d) return;
+      const es: Record<string, string> = { VALIDATED: "validado", CORRECTED: "corregido", REJECTED: "rechazado" };
+      const nm: Record<string, string> = { analysis: "El análisis", strategy: "La estrategia", artifact: "El artefacto" };
+      respond(`${nm[kind] || kind} quedó ${es[status] || status.toLowerCase()}.`);
+    });
 
   async function createReq(title: string, description: string) {
     if (!title.trim()) return;
     const s = slug || "playwright-api";
     const d = await act("create", `/api/requirements`, { slug: s, title, description });
-    if (d?.requirement) { setSlug(s); setSelectedId(d.requirement.id); flash("Requerimiento ingresado"); }
+    if (d?.requirement) { setSlug(s); setSelectedId(d.requirement.id); respond(`Requerimiento ingresado: ${title}. Puedes decir "analiza este ticket".`); }
   }
 
   // ── Barra de comandos (precursora de la voz) ──────────────────────────────────
@@ -170,7 +205,38 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
     if (/aprob|acept/.test(t) && detail?.strategy) return validate("strategy", detail.strategy.id, "VALIDATED");
     if (/valida/.test(t) && detail?.analysis) return validate("analysis", detail.analysis.id, "VALIDATED");
     if (/implement|gener|cod/.test(t)) return implement();
-    flash(`No entendí "${text}". Prueba: analiza / genera el plan / aprueba / implementa`, true);
+    respond(`No entendí "${text}". Prueba: analiza / genera el plan / aprueba / implementa`, true);
+  }
+
+  // Comando llegado por voz: se audita (canal VOICE) y se ejecuta igual que un clic.
+  async function handleVoice(transcript: string) {
+    chan.current = "VOICE";
+    try {
+      // Registra el comando de voz en el log de auditoría (traza el transcript).
+      fetch("/api/events", {
+        method: "POST",
+        headers: { ...headers, "x-beatrice-channel": "VOICE" },
+        body: JSON.stringify({ action: "voice.command", slug, requirementId: selectedId, transcript }),
+      }).catch(() => {});
+      await runCommand(transcript);
+    } finally {
+      chan.current = "UI";
+    }
+  }
+
+  function toggleMic() {
+    const rec = getRecognizer();
+    if (listening) { rec.stop(); setListening(false); return; }
+    if (!rec.supported()) { respond("Tu navegador no soporta reconocimiento de voz.", true); return; }
+    setListening(true);
+    rec.start({
+      onResult: (text, isFinal) => {
+        setCmd(text);
+        if (isFinal) { setListening(false); setCmd(""); handleVoice(text); }
+      },
+      onEnd: () => setListening(false),
+      onError: (m) => { setListening(false); respond(`Voz: ${m}`, true); },
+    });
   }
 
   const conf = kpis?.confidence?.score ?? 0;
@@ -198,11 +264,24 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
       {/* Command bar */}
       <form onSubmit={(e) => { e.preventDefault(); if (cmd.trim()) { runCommand(cmd); setCmd(""); } }}
         style={{ display: "flex", gap: 8, marginTop: 14 }}>
-        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, background: C.panel, border: `1px solid ${C.lineHi}`, borderRadius: 8, padding: "8px 12px" }}>
-          <span style={{ color: C.accent, fontFamily: MONO, fontSize: 13 }}>▮</span>
-          <input value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder='Dile a Beatrice: "analiza este ticket", "genera el plan", "aprueba", "implementa"…'
+        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, background: C.panel, border: `1px solid ${listening ? C.reject : C.lineHi}`, borderRadius: 8, padding: "8px 12px", boxShadow: listening ? `0 0 0 3px rgba(251,90,118,.15)` : "none", transition: "all .2s" }}>
+          <span style={{ color: listening ? C.reject : C.accent, fontFamily: MONO, fontSize: 13 }}>{listening ? "●" : "▮"}</span>
+          <input value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder={listening ? "Escuchando…" : 'Dile a Beatrice: "analiza este ticket", "genera el plan", "aprueba", "implementa"…'}
             style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: C.text, fontFamily: MONO, fontSize: 12 }} />
-          <span style={{ color: C.faint, fontFamily: MONO, fontSize: 9 }}>voz: F8</span>
+          {voiceOk ? (
+            <>
+              <button type="button" onClick={toggleMic} disabled={isCTO} title={isCTO ? "La vista Métricas no opera" : listening ? "Detener" : "Hablar a Beatrice"}
+                style={{ border: "none", background: "transparent", cursor: isCTO ? "not-allowed" : "pointer", color: listening ? C.reject : C.accent, fontSize: 15, opacity: isCTO ? 0.4 : 1 }}>
+                {listening ? "◼" : "🎤"}
+              </button>
+              <button type="button" onClick={() => { setSpeakOn((v) => { if (v) getSpeaker().cancel(); return !v; }); }} title={speakOn ? "Silenciar voz de Beatrice" : "Activar voz de Beatrice"}
+                style={{ border: "none", background: "transparent", cursor: "pointer", color: speakOn ? C.accent : C.faint, fontSize: 14 }}>
+                {speakOn ? "🔊" : "🔇"}
+              </button>
+            </>
+          ) : (
+            <span style={{ color: C.faint, fontFamily: MONO, fontSize: 9 }}>voz no disponible</span>
+          )}
         </div>
         <Btn tone="accent" disabled={!cmd.trim()}>ejecutar</Btn>
       </form>

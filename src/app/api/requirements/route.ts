@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { resolveActor, denyIfNotOperator } from "@/lib/auth";
+import { resolveActor, denyIfNotOperator, resolveChannel } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
@@ -47,6 +47,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "missing slug or title" }, { status: 400 });
   }
 
+  const channel = resolveChannel(req);
   const project = await prisma.project.upsert({
     where: { slug: body.slug },
     update: { name: body.projectName || undefined },
@@ -61,13 +62,14 @@ export async function POST(req: Request) {
       source: body.source || "MANUAL",
       externalRef: body.externalRef || null,
       currentPhase: "ANALYSIS",
-      transitions: { create: { fromPhase: null, toPhase: "ANALYSIS", channel: "UI" } },
+      transitions: { create: { fromPhase: null, toPhase: "ANALYSIS", channel } },
     },
   });
 
   await audit({
     action: "requirement.created",
     actorType: "HUMAN",
+    channel,
     projectId: project.id,
     requirementId: requirement.id,
     payload: { title: requirement.title, source: requirement.source },

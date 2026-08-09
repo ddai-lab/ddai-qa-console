@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getProvider } from "@/lib/ai";
-import { resolveActor, denyIfNotOperator } from "@/lib/auth";
+import { resolveActor, denyIfNotOperator, resolveChannel } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
@@ -47,6 +47,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   await audit({
     action: "analysis.generated",
     actorType: "AI",
+    channel: resolveChannel(req),
     projectId: requirement.projectId,
     requirementId: requirement.id,
     payload: { model: provider.name, areas: result.interpretation.areas },
