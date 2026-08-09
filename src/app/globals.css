@@ -1,4 +1,6 @@
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; background: #0a0c0f; }
+html, body { margin: 0; padding: 0; background: #0b1120; }
 body { -webkit-font-smoothing: antialiased; }
 button { font-family: inherit; }
+::selection { background: rgba(56,189,248,.3); }
+input::placeholder, textarea::placeholder { color: #5a6785; }

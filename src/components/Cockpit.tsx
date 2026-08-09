@@ -1,12 +1,18 @@
 "use client";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
-// ── Tema "centro de mando" ────────────────────────────────────────────────────
+// ── Tema "centro de mando" · identidad Detrás del Algoritmo (azul-noche + gradientes) ──
 const C = {
-  bg: "#080a0d", panel: "#11151a", panel2: "#0d1116", line: "#1d242c", lineHi: "#2b3540",
-  text: "#e6edf3", dim: "#7d8896", faint: "#4a5560",
-  ai: "#8b7dff", human: "#3ddc97", pending: "#ffb454", reject: "#ff5470", accent: "#3ddc97",
-  glow: "rgba(61,220,151,.12)",
+  bg: "#0b1120", panel: "#141c30", panel2: "#0f1626", line: "#243049", lineHi: "#31405f",
+  text: "#eaf0fb", dim: "#8b98b5", faint: "#5a6785",
+  ai: "#a855f7", human: "#34d399", pending: "#fbbf24", reject: "#fb5a76", accent: "#38bdf8",
+  pass: "#34d399", glow: "rgba(56,189,248,.16)",
+};
+// Gradiente de marca (cian → azul → púrpura → naranja), como el sitio.
+const BRAND = "linear-gradient(90deg,#22d3ee,#3b82f6,#a855f7,#f59e0b)";
+// Fondo con glow superior para que no se sienta plano/negro.
+const BG_STYLE: React.CSSProperties = {
+  background: `radial-gradient(1200px 480px at 50% -140px, rgba(59,130,246,.18), transparent 60%), radial-gradient(900px 420px at 90% -80px, rgba(168,85,247,.12), transparent 55%), ${C.bg}`,
 };
 const MONO = "'JetBrains Mono','Fira Code',ui-monospace,SFMono-Regular,Menlo,monospace";
 const SANS = "ui-sans-serif,system-ui,-apple-system,sans-serif";
@@ -158,29 +164,30 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
   // ── Barra de comandos (precursora de la voz) ──────────────────────────────────
   function runCommand(text: string) {
     const t = text.toLowerCase();
-    if (!selectedId && !/nuev|crea|ingres/.test(t)) { flash("Seleccioná un requerimiento primero", true); return; }
+    if (!selectedId && !/nuev|crea|ingres/.test(t)) { flash("Selecciona un requerimiento primero", true); return; }
     if (/analiz/.test(t)) return analyze();
     if (/estrategia|plan|diseñ|diseno|pir/.test(t)) return strategy();
     if (/aprob|acept/.test(t) && detail?.strategy) return validate("strategy", detail.strategy.id, "VALIDATED");
     if (/valida/.test(t) && detail?.analysis) return validate("analysis", detail.analysis.id, "VALIDATED");
     if (/implement|gener|cod/.test(t)) return implement();
-    flash(`No entendí "${text}". Probá: analizá / generá el plan / aprobá / implementá`, true);
+    flash(`No entendí "${text}". Prueba: analiza / genera el plan / aprueba / implementa`, true);
   }
 
   const conf = kpis?.confidence?.score ?? 0;
 
   return (
-    <main style={{ background: C.bg, minHeight: "100vh", color: C.text, fontFamily: SANS, padding: "22px 26px" }}>
+    <main style={{ ...BG_STYLE, minHeight: "100vh", color: C.text, fontFamily: SANS, padding: "22px 26px" }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 14, borderBottom: `1px solid ${C.line}`, paddingBottom: 14 }}>
-        <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, letterSpacing: 1 }}>BEATRICE<span style={{ color: C.accent }}>.</span></div>
+        <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, letterSpacing: 1, background: BRAND, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>BEATRICE<span style={{ color: "#f59e0b", WebkitTextFillColor: "#f59e0b" }}>.</span></div>
         <div style={{ color: C.dim, fontFamily: MONO, fontSize: 11 }}>cockpit de QA agéntico</div>
         <div style={{ flex: 1 }} />
         <div style={{ color: C.dim, fontFamily: MONO, fontSize: 11 }}>{projectName ? `proyecto · ${projectName}` : "sin proyecto"}</div>
-        {/* Switch de rol */}
+        {/* Cambio de vista por rol: QA agéntico opera; CTO sólo observa (KPIs y confianza). */}
+        <span style={{ color: C.faint, fontFamily: MONO, fontSize: 10 }}>vista</span>
         <div style={{ display: "flex", border: `1px solid ${C.line}`, borderRadius: 6, overflow: "hidden" }}>
           {(["QA_AGENTIC", "CTO"] as Role[]).map((r) => (
-            <button key={r} onClick={() => setRole(r)} style={{
+            <button key={r} onClick={() => setRole(r)} title={r === "CTO" ? "Solo lectura: KPIs y confianza" : "Vista operativa: dirige el flujo"} style={{
               fontFamily: MONO, fontSize: 10, padding: "5px 10px", cursor: "pointer", border: "none",
               background: role === r ? C.glow : "transparent", color: role === r ? C.accent : C.dim,
             }}>{r === "CTO" ? "CTO" : "QA agéntico"}</button>
@@ -193,19 +200,19 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
         style={{ display: "flex", gap: 8, marginTop: 14 }}>
         <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, background: C.panel, border: `1px solid ${C.lineHi}`, borderRadius: 8, padding: "8px 12px" }}>
           <span style={{ color: C.accent, fontFamily: MONO, fontSize: 13 }}>▮</span>
-          <input value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder='Decile a Beatrice: "analizá este ticket", "generá el plan", "aprobá", "implementá"…'
+          <input value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder='Dile a Beatrice: "analiza este ticket", "genera el plan", "aprueba", "implementa"…'
             style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: C.text, fontFamily: MONO, fontSize: 12 }} />
           <span style={{ color: C.faint, fontFamily: MONO, fontSize: 9 }}>voz: F8</span>
         </div>
         <Btn tone="accent" disabled={!cmd.trim()}>ejecutar</Btn>
       </form>
 
-      {!dbOk && <div style={{ marginTop: 18, color: C.pending, fontFamily: MONO, fontSize: 12 }}>Base de datos no conectada. Configurá DATABASE_URL y corré las migraciones.</div>}
+      {!dbOk && <div style={{ marginTop: 18, color: C.pending, fontFamily: MONO, fontSize: 12 }}>Base de datos no conectada. Configura DATABASE_URL y corre las migraciones.</div>}
 
       {/* KPI strip */}
       {kpis && (
         <div style={{ display: "flex", gap: 12, marginTop: 16, alignItems: "stretch" }}>
-          <div style={{ background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 8, padding: "8px 16px", display: "flex", alignItems: "center" }}><Ring pct={conf} /></div>
+          <div style={{ background: `linear-gradient(180deg, rgba(56,189,248,.08), rgba(168,85,247,.05)), ${C.panel2}`, border: `1px solid ${C.lineHi}`, borderRadius: 8, padding: "8px 16px", display: "flex", alignItems: "center", boxShadow: `0 0 34px ${C.glow}` }}><Ring pct={conf} /></div>
           <Kpi label="CASOS IA ACEPTADOS" value={`${Math.round((kpis.process.aiCases.acceptanceRate || 0) * 100)}%`} sub={`${kpis.process.aiCases.validated}/${kpis.process.aiCases.total} sin corrección`} />
           <Kpi label="COBERTURA PIRÁMIDE" value={`${Math.round((kpis.process.pyramidCoverage || 0) * 100)}%`} sub="ejecutados / decididos" />
           <Kpi label="DEFECTOS ESCAPADOS" value={`${kpis.quality.escapedToProd}`} sub={`${kpis.quality.caughtEarly} atrapados temprano`} color={kpis.quality.escapedToProd ? C.reject : C.human} />
@@ -244,7 +251,7 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
 
         {/* Detalle */}
         <div>
-          {!detail && <div style={{ color: C.faint, fontFamily: MONO, fontSize: 12, padding: 20 }}>Seleccioná un requerimiento para dirigir su ciclo de calidad.</div>}
+          {!detail && <div style={{ color: C.faint, fontFamily: MONO, fontSize: 12, padding: 20 }}>Selecciona un requerimiento para dirigir su ciclo de calidad.</div>}
           {detail && <Detail detail={detail} busy={busy} isCTO={isCTO} showCode={showCode} setShowCode={setShowCode}
             onAnalyze={analyze} onStrategy={strategy} onImplement={implement} onValidate={validate} />}
         </div>
@@ -317,7 +324,7 @@ function Detail({ detail, busy, isCTO, showCode, setShowCode, onAnalyze, onStrat
       </div>
 
       {/* M1 · Análisis */}
-      <Section n={1} title="Análisis" subtitle="La IA interpreta el ticket; vos validás.">
+      <Section n={1} title="Análisis" subtitle="La IA interpreta el ticket; tú validas.">
         {!a ? (
           <Btn onClick={onAnalyze} disabled={isCTO || busy === "analyze"}>{busy === "analyze" ? "analizando…" : "▶ analizar con IA"}</Btn>
         ) : (
@@ -344,7 +351,7 @@ function Detail({ detail, busy, isCTO, showCode, setShowCode, onAnalyze, onStrat
       </Section>
 
       {/* M2 · Diseño de estrategia */}
-      <Section n={2} title="Diseño de estrategia" subtitle="Pirámide de Cohn con criterio explícito." locked={!analysisOk} lockMsg="Validá el análisis primero.">
+      <Section n={2} title="Diseño de estrategia" subtitle="Pirámide de Cohn con criterio explícito." locked={!analysisOk} lockMsg="Valida el análisis primero.">
         {!s ? (
           <Btn onClick={onStrategy} disabled={isCTO || !analysisOk || busy === "strategy"}>{busy === "strategy" ? "diseñando…" : "▶ diseñar estrategia"}</Btn>
         ) : (
@@ -371,7 +378,7 @@ function Detail({ detail, busy, isCTO, showCode, setShowCode, onAnalyze, onStrat
       </Section>
 
       {/* M3 · Implementación */}
-      <Section n={3} title="Implementación" subtitle="Código de prueba por nivel, trazable." locked={!s?.approved} lockMsg="Aprobá la estrategia primero.">
+      <Section n={3} title="Implementación" subtitle="Código de prueba por nivel, trazable." locked={!s?.approved} lockMsg="Aprueba la estrategia primero.">
         {artifacts.length === 0 ? (
           <Btn onClick={onImplement} disabled={isCTO || !s?.approved || busy === "implement"}>{busy === "implement" ? "generando…" : "▶ generar código"}</Btn>
         ) : (
@@ -403,7 +410,7 @@ function Detail({ detail, busy, isCTO, showCode, setShowCode, onAnalyze, onStrat
       {/* M4 · Ejecución (informativo; la ingesta llega por CI) */}
       <Section n={4} title="Ejecución" subtitle="Los resultados llegan del CI vía POST /api/runs.">
         <div style={{ fontFamily: MONO, fontSize: 11, color: C.dim }}>
-          Conectá el pipeline (GitHub Actions) y los resultados se enlazan a estos artefactos automáticamente.
+          Conecta el pipeline (GitHub Actions) y los resultados se enlazan a estos artefactos automáticamente.
         </div>
       </Section>
     </div>
