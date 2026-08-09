@@ -1,5 +1,12 @@
-// QA Console · esquema de datos
-// Vive en su PROPIA base de datos (qaconsole), separada de ddai-web.
+// Beatrice · Cockpit de QA agéntico
+// Schema diseñado con dos principios inquebrantables:
+//  (a) La trazabilidad humano-IA es un patrón UNIFORME embebido en cada artefacto generable
+//      (origin / validationStatus / validatedBy...) — nunca hay ambigüedad sobre quién produjo qué.
+//  (b) Cada KPI del producto es una consulta NATIVA sobre estas tablas, no un cálculo improvisado.
+//
+// Vive en su propia base de datos (separada de ddai-web). Reusa el patrón Prisma+Postgres
+// del andamiaje original de la QA Console.
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,27 +16,359 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Project {
-  id        String   @id @default(cuid())
-  slug      String   @unique          // ej: "playwright-api"
-  name      String
-  createdAt DateTime @default(now())
-  runs      Run[]
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Origin {
+  AI
+  HUMAN
 }
 
-model Run {
+enum ValidationStatus {
+  PENDING // generado por IA, esperando revisión humana
+  VALIDATED // el humano lo aprobó tal cual
+  CORRECTED // el humano lo modificó antes de aprobar
+  REJECTED // el humano lo descartó
+}
+
+// Fases del ciclo ISTQB — cada requerimiento las recorre de forma visible y trazable.
+enum Phase {
+  ANALYSIS
+  DESIGN
+  IMPLEMENTATION
+  EXECUTION
+  CLOSURE
+}
+
+// Niveles de la pirámide de Cohn. La IA decide CON CRITERIO cuál aplica y por qué.
+enum PyramidLevel {
+  UNIT
+  COMPONENT
+  INTEGRATION
+  API
+  UI_E2E
+  PERFORMANCE
+  SECURITY
+}
+
+enum Framework {
+  PLAYWRIGHT
+  K6
+  VITEST
+}
+
+enum Status {
+  passed
+  failed
+  skipped
+  flaky
+}
+
+enum Role {
+  QA_AGENTIC // vista operativa completa: dirige el flujo, aprueba/corrige cada fase
+  CTO // solo visibilidad: KPIs y score de confianza, sin operar
+  PM
+  DEVELOPER
+}
+
+// Canal por el que se originó una acción — la trazabilidad no se pierde por usar voz.
+enum Channel {
+  UI
+  VOICE
+  API
+  CI
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Organización y acceso
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Client {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  projects Project[]
+  baseline BaselineConfig?
+}
+
+model Project {
+  id        String   @id @default(cuid())
+  slug      String   @unique // ej: "playwright-api"
+  name      String
+  client    Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  clientId  String?
+  createdAt DateTime @default(now())
+
+  requirements Requirement[]
+  runs         TestRun[]
+  confidence   ConfidenceSnapshot[]
+  defects      Defect[]
+  events       AuditEvent[]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  role      Role     @default(QA_AGENTIC)
+  createdAt DateTime @default(now())
+
+  memberships ProjectMembership[]
+  events      AuditEvent[]
+}
+
+// Permisos por proyecto — arquitectura lista para más roles sin migración de datos.
+model ProjectMembership {
+  id        String @id @default(cuid())
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  projectId String
+  role      Role   @default(QA_AGENTIC)
+
+  @@unique([userId, projectId])
+}
+
+// Baselines de negocio por cliente (best practices QA, configurables).
+model BaselineConfig {
+  id       String @id @default(cuid())
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId String @unique
+
+  // Costo promedio de un incidente que escapa a producción (USD).
+  avgIncidentCostUsd             Decimal @default(5000) @db.Decimal(10, 2)
+  // Costo hora de un QA humano (USD) — para "horas ahorradas".
+  qaHourlyRateUsd                Decimal @default(40) @db.Decimal(10, 2)
+  // Defectos escapados a prod por mes ANTES de Beatrice (línea base histórica).
+  escapedDefectsBaselinePerMonth Int     @default(4)
+  // Minutos de QA humano que ahorra cada caso generado por IA y aceptado.
+  minutesSavedPerAcceptedCase    Int     @default(25)
+
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Módulo 1 · Análisis — ingresa un ticket, la IA lo interpreta, el humano valida.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Requirement {
+  id           String   @id @default(cuid())
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId    String
+  externalRef  String? // id en Jira/Linear/GitHub Issue (a futuro); hoy manual
+  title        String
+  description  String
+  source       String   @default("MANUAL") // MANUAL | API | GITHUB | JIRA
+  currentPhase Phase    @default(ANALYSIS)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  analysis    Analysis?
+  strategy    TestStrategy?
+  transitions PhaseTransition[]
+  defects     Defect[]
+  confidence  ConfidenceSnapshot[]
+
+  @@index([projectId, currentPhase])
+}
+
+// Sella los timestamps de cada cambio de fase → habilita KPIs de proceso nativos.
+model PhaseTransition {
+  id            String      @id @default(cuid())
+  requirement   Requirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  requirementId String
+  fromPhase     Phase?
+  toPhase       Phase
+  at            DateTime    @default(now())
+  actorId       String?
+  channel       Channel     @default(UI)
+
+  @@index([requirementId, at])
+}
+
+model Analysis {
+  id            String      @id @default(cuid())
+  requirement   Requirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  requirementId String      @unique
+
+  // Interpretación estructurada: qué toca el requerimiento.
+  // { areas: ["API","UI"], dataSensitive: bool, thirdParties: [...], risks: [...], summary }
+  interpretation Json
+  reasoning      String // por qué la IA interpretó así (nada de caja negra)
+
+  // Procedencia + validación humana (patrón uniforme)
+  origin           Origin           @default(AI)
+  generatedByModel String? // ej "heuristic-v1" o "claude-opus-4-8"
+  validationStatus ValidationStatus @default(PENDING)
+  validatedById    String?
+  validatedByName  String?
+  validatedAt      DateTime?
+  correctionNote   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Módulo 2 · Diseño de estrategia — pirámide de Cohn, plan editable que el QA aprueba.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model TestStrategy {
+  id            String      @id @default(cuid())
+  requirement   Requirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  requirementId String      @unique
+  summary       String
+  approved      Boolean     @default(false)
+
+  origin           Origin           @default(AI)
+  generatedByModel String?
+  validationStatus ValidationStatus @default(PENDING)
+  validatedById    String?
+  validatedByName  String?
+  validatedAt      DateTime?
+  correctionNote   String?
+
+  decisions TestLevelDecision[]
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+}
+
+model TestLevelDecision {
+  id         String       @id @default(cuid())
+  strategy   TestStrategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  strategyId String
+  level      PyramidLevel
+  rationale  String // POR QUÉ este nivel aplica a este requerimiento
+  priority   Int          @default(0)
+
+  origin           Origin           @default(AI)
+  validationStatus ValidationStatus @default(PENDING)
+
+  artifacts TestArtifact[]
+
+  @@index([strategyId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Módulo 3 · Implementación — código de prueba generado + trazabilidad completa.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model TestArtifact {
+  id                String            @id @default(cuid())
+  decision          TestLevelDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+  decisionId        String
+  framework         Framework
+  filePath          String
+  code              String            @db.Text
+  externalTicketRef String? // ticket creado en gestión (GitHub Issue en la demo)
+
+  origin           Origin           @default(AI)
+  generatedByModel String?
+  validationStatus ValidationStatus @default(PENDING)
+  validatedById    String?
+  validatedByName  String?
+  validatedAt      DateTime?
+  correctionNote   String?
+
+  results   TestCaseResult[]
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([decisionId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Módulo 4 · Ejecución — reusa el patrón de ingesta original (Playwright/CI → /api/runs).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model TestRun {
   id         String   @id @default(cuid())
-  externalId String                    // ej: "run-0042" (del CI)
   project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   projectId  String
+  externalId String // ej "run-0042" (del CI)
   timestamp  DateTime @default(now())
   durationMs Int      @default(0)
   passed     Int      @default(0)
   failed     Int      @default(0)
   skipped    Int      @default(0)
   flaky      Int      @default(0)
-  suites     Json                       // [{ name, tests: [{title,status,durationMs,error}] }]
+  suites     Json // crudo, retrocompatible con el contrato original
   createdAt  DateTime @default(now())
 
+  results TestCaseResult[] // normalizado → habilita cobertura real por nivel
+
   @@index([projectId, timestamp])
+}
+
+// Enlaza cada resultado con el artefacto que lo produjo (y por ende con su nivel de pirámide).
+model TestCaseResult {
+  id         String        @id @default(cuid())
+  run        TestRun       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  runId      String
+  artifact   TestArtifact? @relation(fields: [artifactId], references: [id], onDelete: SetNull)
+  artifactId String?
+  title      String
+  status     Status
+  durationMs Int           @default(0)
+  error      String?
+
+  @@index([runId])
+  @@index([artifactId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Módulo 5 · Cierre / KPIs
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Defect {
+  id            String       @id @default(cuid())
+  project       Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId     String
+  requirement   Requirement? @relation(fields: [requirementId], references: [id], onDelete: SetNull)
+  requirementId String?
+  title         String
+  phaseDetected Phase // ¿en qué fase se detectó? (temprano = barato)
+  escapedToProd Boolean      @default(false)
+  estimatedCost Decimal?     @db.Decimal(10, 2)
+  detectedAt    DateTime     @default(now())
+  resolvedAt    DateTime?
+
+  @@index([projectId, escapedToProd])
+}
+
+// Score de confianza en el tiempo (evolución, no foto estática).
+// score = passRate × coberturaPirámide × (0.5 + 0.5×tasaValidaciónHumana) − penalización defectos
+model ConfidenceSnapshot {
+  id            String       @id @default(cuid())
+  project       Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId     String
+  requirement   Requirement? @relation(fields: [requirementId], references: [id], onDelete: SetNull)
+  requirementId String?
+  score         Int // 0..100
+  breakdown     Json // { passRate, pyramidCoverage, validationRate, escapedPenalty }
+  computedAt    DateTime     @default(now())
+
+  @@index([projectId, computedAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Trazabilidad transversal — TODA acción queda registrada, venga de click o de voz.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AuditEvent {
+  id            String   @id @default(cuid())
+  project       Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  projectId     String?
+  requirementId String?
+  actor         User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorId       String?
+  actorType     Origin // ¿lo hizo un humano o la IA?
+  channel       Channel  @default(UI)
+  action        String // ej "analysis.generated", "strategy.approved", "voice.command"
+  payload       Json?
+  at            DateTime @default(now())
+
+  @@index([projectId, at])
+  @@index([requirementId, at])
 }

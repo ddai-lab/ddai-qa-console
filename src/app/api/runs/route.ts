@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { tally, adaptPlaywright, type SuiteT, type Payload } from "@/lib/normalize";
+import { checkIngestToken } from "@/lib/auth";
+import { audit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +15,7 @@ export async function GET(req: Request) {
     : await prisma.project.findFirst({ orderBy: { createdAt: "asc" } });
   if (!project) return NextResponse.json({ project: null, runs: [] });
 
-  const runs = await prisma.run.findMany({
+  const runs = await prisma.testRun.findMany({
     where: { projectId: project.id },
     orderBy: { timestamp: "desc" },
     take: 15,
@@ -28,11 +30,10 @@ export async function GET(req: Request) {
   });
 }
 
-// POST /api/runs  -> ingesta autenticada. Header: Authorization: Bearer <INGEST_TOKEN>
+// POST /api/runs  -> Módulo 4 (Ejecución). Ingesta autenticada desde CI (GitHub Actions).
+// Header: Authorization: Bearer <INGEST_TOKEN>.  CONTRATO IDÉNTICO al original — no romper.
 export async function POST(req: Request) {
-  const auth = req.headers.get("authorization") || "";
-  const token = auth.replace(/^Bearer\s+/i, "");
-  if (!process.env.INGEST_TOKEN || token !== process.env.INGEST_TOKEN) {
+  if (!checkIngestToken(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -56,13 +57,20 @@ export async function POST(req: Request) {
   }
 
   const suites: SuiteT[] = run.suites;
-  const t = tally(suites.flatMap((s) => s.tests));
+  const flatTests = suites.flatMap((s) => s.tests);
+  const t = tally(flatTests);
 
   const project = await prisma.project.upsert({
     where: { slug }, update: { name }, create: { slug, name },
   });
 
-  const saved = await prisma.run.create({
+  // Intento de enlace trazable: casar cada resultado con el artefacto que lo produjo (por título).
+  const artifacts = await prisma.testArtifact.findMany({
+    where: { decision: { strategy: { requirement: { projectId: project.id } } } },
+    select: { id: true, filePath: true },
+  });
+
+  const saved = await prisma.testRun.create({
     data: {
       externalId: run.externalId || `run-${Date.now()}`,
       projectId: project.id,
@@ -70,8 +78,36 @@ export async function POST(req: Request) {
       durationMs: run.durationMs || 0,
       passed: t.passed, failed: t.failed, skipped: t.skipped, flaky: t.flaky,
       suites: suites as any,
+      results: {
+        create: flatTests.map((test) => ({
+          title: test.title,
+          status: test.status,
+          durationMs: test.durationMs || 0,
+          error: test.error || null,
+          artifactId: matchArtifact(artifacts, test.title),
+        })),
+      },
     },
   });
 
+  await audit({
+    action: "run.ingested",
+    actorType: "AI",
+    channel: "CI",
+    projectId: project.id,
+    payload: { externalId: saved.externalId, tally: t },
+  });
+
   return NextResponse.json({ ok: true, id: saved.id, tally: t });
+}
+
+// Enlaza por coincidencia laxa de título con el nombre de archivo del artefacto.
+function matchArtifact(
+  artifacts: { id: string; filePath: string }[],
+  title: string
+): string | null {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const t = norm(title);
+  const hit = artifacts.find((a) => t.includes(norm(a.filePath.split("/").pop()?.replace(/\.\w+$/, "") || "")));
+  return hit?.id ?? null;
 }

@@ -1,95 +1,94 @@
-# QA Console · DDAI
+# Beatrice · Cockpit de QA agéntico
 
-Dashboard de resultados de pruebas del QA Lab (The QAlliance). Mismo patrón que `ddai-web`:
-repo → push → deploy automático en Coolify. Pensada para vivir en el **mismo servidor**
-(Hetzner CPX32) **sin exponer la web principal** y **sin costo adicional**.
+Beatrice **no es un agente que reemplaza al QA**. Es un **cockpit** que convierte a un QA
+humano tradicional en un **"QA agéntico"**: dirige modelos de IA por cada fase del ciclo de
+calidad, con **criterio humano validando cada paso**. La marca de la casa: nunca hay
+ambigüedad sobre *qué generó la IA, qué validó un humano y qué quedó pendiente*.
 
----
-
-## Qué hace
-
-- Muestra pass rate, totales, historial de runs y suites con sus errores.
-- Recibe resultados de los 6 proyectos del lab vía `POST /api/runs` (autenticado por token).
-- Lectura pública (vitrina), escritura cerrada.
-
-## Las 3 barreras de seguridad (no opcionales)
-
-1. **Base de datos PROPIA.** La consola usa su base `qaconsole` y su usuario `qaconsole_app`,
-   nunca las credenciales de `ddai-web`. Un fallo aquí no toca los datos del sitio.
-2. **Ingesta autenticada.** `POST /api/runs` exige `Authorization: Bearer <INGEST_TOKEN>`.
-   Sin token válido → 401. La consola pública es solo de lectura.
-3. **Límite de recursos** en Coolify (abajo) para que la consola no ahogue al sitio principal.
-
-> El vault de Obsidian va aparte y **privado** (Cloudflare Access / Tailscale). No se sirve desde aquí.
+Construida sobre Next.js 14 + PostgreSQL (Prisma). Deploy en Coolify, mismo patrón que el
+resto del lab.
 
 ---
 
-## Despliegue en Coolify (paso a paso)
+## Marco de referencia
 
-### 1. Crear la base de datos separada
-En el PostgreSQL del servidor (consola SQL de Coolify o `psql`):
+- **Ciclo ISTQB** — cada requerimiento recorre `Análisis → Diseño → Implementación → Ejecución → Cierre` de forma visible y trazable.
+- **Pirámide de Cohn** — la IA decide *con criterio explícito* qué nivel de prueba aplica (unit, API, UI/E2E, performance, seguridad); nunca todo termina en E2E, y siempre muestra el porqué.
 
-```sql
-CREATE DATABASE qaconsole;
-CREATE USER qaconsole_app WITH PASSWORD 'PON_UNA_PASSWORD_FUERTE';
-GRANT ALL PRIVILEGES ON DATABASE qaconsole TO qaconsole_app;
+## Los 5 módulos (flujo core)
+
+| # | Módulo | Endpoint | Qué hace |
+|---|---|---|---|
+| 1 | **Análisis** | `POST /api/requirements` · `POST /api/requirements/:id/analyze` | Ingresa un ticket; la IA interpreta qué toca (API/UI/datos sensibles/terceros) con su razonamiento. El humano valida/corrige. |
+| 2 | **Diseño** | `POST /api/requirements/:id/strategy` | La IA propone la pirámide de Cohn con rationale por nivel. Plan editable que el QA aprueba. |
+| 3 | **Implementación** | `POST /api/requirements/:id/implement` | Genera código de prueba (Playwright / k6 / Vitest) por nivel, con trazabilidad completa. |
+| 4 | **Ejecución** | `POST /api/runs` (Bearer token) | CI (GitHub Actions) empuja resultados; se enlazan al artefacto que los produjo. |
+| 5 | **Cierre** | `GET /api/kpis` | KPIs nativos + score de confianza por proyecto, con evolución en el tiempo. |
+
+Validación humana transversal: `POST /api/validate` (`kind` = analysis \| strategy \| artifact;
+`status` = VALIDATED \| CORRECTED \| REJECTED). Toda acción — de IA o humana, por click o voz —
+queda en el log de auditoría (`AuditEvent`).
+
+## La capa de IA es intercambiable
+
+Hoy la implementa un **motor heurístico determinista en JS** (`src/lib/ai/heuristic.ts`,
+`heuristic-v1`): liviano, sin API key, reproducible — ideal para la demo pública. Para
+enchufar un LLM real basta otra implementación de `AIProvider` en `src/lib/ai/` y devolverla
+en `getProvider()`. Los módulos no cambian.
+
+## Score de confianza (auditable, no mágico)
+
 ```
-(Hardening opcional: tras el primer arranque, limitar a `SELECT, INSERT` en las tablas.)
-
-### 2. Crear el token de ingesta
-```bash
-openssl rand -hex 32
+score = 100 × passRate × coberturaPirámide × (0.5 + 0.5×tasaValidaciónHumana) − 10×defectosEscapadosAbiertos
 ```
+Sin validación humana el techo es 50: la confianza requiere que un humano haya mirado. El
+desglose se guarda en cada `ConfidenceSnapshot`.
 
-### 3. Nueva aplicación en Coolify
-- **+ New Resource → Application → desde repo Git** (conecta `mjadrianf/ddai-qa-console`).
-- **Build Pack: Dockerfile** (este repo lo trae).
-- **Variables de entorno:**
-  - `DATABASE_URL = postgresql://qaconsole_app:PASSWORD@<host-postgres>:5432/qaconsole?schema=public`
-  - `INGEST_TOKEN = <el token del paso 2>`
-- **Dominio:** `lab.detrasdelalgoritmo.com` (añade el CNAME en Cloudflare como con el sitio; SSL automático).
-- **Healthcheck:** `/api/health`
-- **Límites (pestaña de recursos):** CPU `0.5`, Memoria `512M` — suficiente para un dashboard y evita el efecto "vecino ruidoso".
+## Roles
 
-### 4. Deploy
-Coolify construye, sincroniza el esquema en `qaconsole` y publica. Cada `git push` re-despliega.
+- **QA agéntico** — vista operativa: dirige el flujo, aprueba/corrige cada fase.
+- **CTO** — solo visibilidad (KPIs y confianza), no opera. La arquitectura queda lista para PM/dev.
 
 ---
 
-## Conectar cada proyecto del lab (en su CI)
+## Barreras de seguridad (no opcionales)
 
-Tras correr los tests, empuja el `results.json` con el helper:
+1. **Base de datos PROPIA** (`beatrice` / `beatrice_app`), nunca las credenciales de `ddai-web`.
+2. **Ingesta autenticada.** `POST /api/runs` exige `Authorization: Bearer <INGEST_TOKEN>` → sin token, 401. La operación del cockpit rechaza al rol CTO (403). Lectura pública.
+3. **Límite de recursos** en Coolify (CPU 0.5 / Mem 512M).
+
+---
+
+## Local
 
 ```bash
-QA_CONSOLE_URL=https://lab.detrasdelalgoritmo.com \
-QA_INGEST_TOKEN=*** \
+npm install
+cp .env.example .env         # DATABASE_URL → Postgres local; INGEST_TOKEN → openssl rand -hex 32
+npm run db:push
+npm run seed                 # dataset de demo (flujo completo con trazabilidad y KPIs)
+npm run dev                  # http://localhost:3000
+```
+
+## Deploy en Coolify
+
+1. **DB separada:**
+   ```sql
+   CREATE DATABASE beatrice;
+   CREATE USER beatrice_app WITH PASSWORD 'PON_UNA_PASSWORD_FUERTE';
+   GRANT ALL PRIVILEGES ON DATABASE beatrice TO beatrice_app;
+   ```
+2. **Token:** `openssl rand -hex 32`
+3. **Nueva App (Dockerfile)** con env `DATABASE_URL` e `INGEST_TOKEN`, dominio, healthcheck `/api/health`, límites CPU 0.5 / Mem 512M.
+4. `git push` re-despliega.
+
+## Conectar un proyecto de pruebas (Módulo 4)
+
+El contrato de ingesta es **idéntico** al original, así que el workflow de `ddai-playwright-api`
+sigue funcionando sin cambios:
+
+```bash
+QA_CONSOLE_URL=https://<beatrice> QA_INGEST_TOKEN=*** \
 node scripts/push-results.mjs --slug playwright-api --name "Playwright API" --file results.json --playwright
 ```
 
-- `--playwright`: el archivo es el JSON reporter de Playwright (se adapta solo).
-- Sin `--playwright`: el archivo cumple el **contrato normalizado**:
-
-```json
-{
-  "externalId": "run-0042",
-  "durationMs": 48230,
-  "suites": [
-    { "name": "auth/token.spec.ts",
-      "tests": [{ "title": "obtiene token", "status": "passed", "durationMs": 1120 }] }
-  ]
-}
-```
-`status` ∈ `passed | failed | skipped | flaky`.
-
-> Los tests **se ejecutan en GitHub Actions (gratis)**, no en el servidor. El server solo
-> recibe y muestra el JSON: por eso el costo no sube y la caja casi ni se entera.
-
----
-
-## Local (opcional)
-```bash
-npm install
-cp .env.example .env   # apunta DATABASE_URL a un Postgres local
-npm run db:push
-npm run dev            # http://localhost:3000
-```
+`status` ∈ `passed | failed | skipped | flaky`. Los tests corren en GitHub Actions, no en el server.
