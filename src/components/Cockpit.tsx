@@ -108,6 +108,7 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
   const [listening, setListening] = useState(false);
   const [speakOn, setSpeakOn] = useState(true);
   const [voiceOk, setVoiceOk] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const headers = useActor(role);
   const isCTO = role === "CTO";
   const chan = useRef<"UI" | "VOICE">("UI"); // canal de la acción en curso (clic vs voz)
@@ -181,6 +182,10 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
     if (!d) return;
     respond(`Generé ${d.artifacts?.length ?? 0} artefacto(s) de prueba. Revísalos y valídalos.`);
   });
+  const executeRun = () => selectedId && act("run", `/api/requirements/${selectedId}/simulate-run`).then((d) => {
+    if (!d) return;
+    respond(`Ejecución lista: ${d.passed} de ${d.total} pruebas pasaron${d.failed ? `, ${d.failed} fallaron` : ""}.`);
+  });
   const validate = (kind: string, id: string, status: Status, note?: string) =>
     act(`v-${id}`, `/api/validate`, { kind, id, status, note }).then((d) => {
       if (!d) return;
@@ -196,16 +201,105 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
     if (d?.requirement) { setSlug(s); setSelectedId(d.requirement.id); respond(`Requerimiento ingresado: ${title}. Puedes decir "analiza este ticket".`); }
   }
 
-  // ── Barra de comandos (precursora de la voz) ──────────────────────────────────
-  function runCommand(text: string) {
-    const t = text.toLowerCase();
-    if (!selectedId && !/nuev|crea|ingres/.test(t)) { flash("Selecciona un requerimiento primero", true); return; }
-    if (/analiz/.test(t)) return analyze();
-    if (/estrategia|plan|diseñ|diseno|pir/.test(t)) return strategy();
-    if (/aprob|acept/.test(t) && detail?.strategy) return validate("strategy", detail.strategy.id, "VALIDATED");
-    if (/valida/.test(t) && detail?.analysis) return validate("analysis", detail.analysis.id, "VALIDATED");
-    if (/implement|gener|cod/.test(t)) return implement();
-    respond(`No entendí "${text}". Prueba: analiza / genera el plan / aprueba / implementa`, true);
+  // ── Helpers de comandos ───────────────────────────────────────────────────────
+  const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const getDetail = async (id: string) => (await fetch(`/api/requirements/${id}`).then((x) => x.json())).requirement;
+
+  function selectByFragment(fragment: string) {
+    const f = norm(fragment);
+    const hit = list.find((r) => norm(r.title).includes(f));
+    if (hit) { setSelectedId(hit.id); return respond(`Abrí: ${hit.title}.`); }
+    return respond(`No encontré un requerimiento que diga "${fragment}".`, true);
+  }
+  function selectRelative(which: "first" | "last" | "next" | "prev") {
+    if (list.length === 0) return respond("No hay requerimientos.", true);
+    const i = Math.max(0, list.findIndex((r) => r.id === selectedId));
+    const idx = which === "first" ? 0 : which === "last" ? list.length - 1 : which === "next" ? Math.min(list.length - 1, i + 1) : Math.max(0, i - 1);
+    const r = list[idx]; setSelectedId(r.id); return respond(`Abrí: ${r.title}.`);
+  }
+  function report(kind: "confidence" | "kpis" | "risks" | "status") {
+    if (!kpis) return respond("Todavía no hay métricas.", true);
+    if (kind === "confidence") return respond(`El score de confianza es ${kpis.confidence.score} sobre 100.`);
+    if (kind === "kpis") return respond(`Aceptación de IA ${Math.round((kpis.process.aiCases.acceptanceRate || 0) * 100)} por ciento. Cobertura de pirámide ${Math.round((kpis.process.pyramidCoverage || 0) * 100)} por ciento. Defectos escapados ${kpis.quality.escapedToProd}. Costo evitado ${Math.round(kpis.business.costAvoidedUsd || 0)} dólares.`);
+    if (kind === "risks") {
+      const rk = detail?.analysis?.interpretation?.risks || [];
+      return respond(rk.length ? `Riesgos detectados: ${rk.join(", ")}.` : "Aún no hay un análisis con riesgos para este requerimiento.");
+    }
+    if (detail) {
+      const nArt = (detail.strategy?.decisions || []).reduce((n: number, d: any) => n + (d.artifacts?.length || 0), 0);
+      return respond(`${detail.title}. Fase: ${detail.currentPhase}. Análisis: ${detail.analysis?.validationStatus || "sin generar"}. Estrategia: ${detail.strategy ? (detail.strategy.approved ? "aprobada" : detail.strategy.validationStatus) : "sin generar"}. ${nArt} artefactos.`);
+    }
+    return respond(`Hay ${list.length} requerimiento(s). Confianza ${kpis.confidence.score}. Selecciona uno para ver su detalle.`);
+  }
+  function helpText() {
+    return respond('Puedes decir: "analiza este ticket", "genera el plan", "aprueba", "corrige el análisis", "implementa", "ejecuta las pruebas", "haz todo el ciclo", "crea un requerimiento: …", "abre el de login", "el siguiente", "¿cuál es el score de confianza?", "dame los KPIs", "qué riesgos hay", "vista métricas", "silencio".');
+  }
+  async function runFullPipeline() {
+    if (isCTO) return respond("La vista Métricas es solo lectura; cambia a QA agéntico para operar.", true);
+    const id = selectedId; if (!id) return;
+    respond("Ejecutando el ciclo completo de calidad…");
+    await analyze();
+    let d = await getDetail(id);
+    if (d?.analysis) await validate("analysis", d.analysis.id, "VALIDATED");
+    await strategy();
+    d = await getDetail(id);
+    if (d?.strategy) await validate("strategy", d.strategy.id, "VALIDATED");
+    await implement();
+    await executeRun();
+    respond("Ciclo completo. Revisa el score de confianza y la cobertura.");
+  }
+
+  // ── Barra de comandos / voz: entiende lenguaje natural en español ──────────────
+  async function runCommand(raw: string) {
+    const t = norm(raw);
+    // Ayuda
+    if (/\b(ayuda|help)\b|que puedes hacer|comandos|opciones/.test(t)) return helpText();
+    // Control de voz
+    if (/(silencio|mutea|callate|no hables)/.test(t)) { setSpeakOn(false); getSpeaker().cancel(); return flash("Voz silenciada."); }
+    if (/(activa la voz|responde en voz|habla)/.test(t)) { setSpeakOn(true); return respond("Voz activada."); }
+    // Cambiar vista
+    if (/(vista|modo)\s*(metrica|cto|kpi|solo lectura)/.test(t)) { setRole("CTO"); return respond("Cambié a la vista Métricas."); }
+    if (/(vista|modo)\s*(qa|operativ|agentic)/.test(t)) { setRole("QA_AGENTIC"); return respond("Cambié a la vista QA agéntico."); }
+    // Reportes hablados (funcionan también en la vista Métricas)
+    if (/(confianza|score)/.test(t)) return report("confidence");
+    if (/(kpi|metrica|indicador)/.test(t)) return report("kpis");
+    if (/riesgo/.test(t)) return report("risks");
+    if (/(estado|resumen|resume|como va|status)/.test(t)) return report("status");
+    // Crear requerimiento
+    if (/\b(crea|nuevo|nueva|ingresa|agrega|anade)\b/.test(t)) {
+      const m = raw.match(/(?:crea|nuevo|nueva|ingresa|agrega|añade|anade)\b[^:]*:?\s*(.+)/i);
+      if (m && m[1] && m[1].trim().length > 2) return createReq(m[1].trim(), "");
+      return respond('Dime el título, por ejemplo: "crea un requerimiento: login con dos factores".', true);
+    }
+    // Selección
+    if (/\b(primer|primero)\b/.test(t)) return selectRelative("first");
+    if (/\b(ultimo)\b/.test(t)) return selectRelative("last");
+    if (/(siguiente|proximo)/.test(t)) return selectRelative("next");
+    if (/(anterior|previo)/.test(t)) return selectRelative("prev");
+    if (/\b(selecciona|abre|abrir|ve a|ir a|elige|muestra el|muestrame el)\b/.test(t)) {
+      const m = raw.match(/(?:selecciona|abre|abrir|ve a|ir a|elige|muestra(?:me)? el)\s+(?:el\s+|la\s+)?(?:requerimiento\s+|ticket\s+|de\s+)?(.+)/i);
+      if (m && m[1]) return selectByFragment(m[1].trim());
+    }
+    // A partir de aquí se necesita un requerimiento seleccionado
+    if (!selectedId) return respond('Primero selecciona o crea un requerimiento. Di "ayuda" para ver los comandos.', true);
+    // Pipeline completo
+    if (/(haz todo|ciclo completo|de principio a fin|automatiza|corre todo|flujo completo)/.test(t)) return runFullPipeline();
+    // Fases del ciclo
+    if (/(corrige|corregi)/.test(t)) {
+      if (/estrategia|plan/.test(t) && detail?.strategy) return validate("strategy", detail.strategy.id, "CORRECTED");
+      if (detail?.analysis) return validate("analysis", detail.analysis.id, "CORRECTED");
+    }
+    if (/(rechaza|descarta)/.test(t)) {
+      if (/estrategia|plan/.test(t) && detail?.strategy) return validate("strategy", detail.strategy.id, "REJECTED");
+      if (detail?.analysis) return validate("analysis", detail.analysis.id, "REJECTED");
+    }
+    if (/analiz|interpreta/.test(t)) return analyze();
+    if (/estrategia|plan de prueba|diseñ|disen|piramide|cohn/.test(t)) return strategy();
+    if (/aprob|acept/.test(t)) { if (detail?.strategy) return validate("strategy", detail.strategy.id, "VALIDATED"); return respond("Aún no hay estrategia para aprobar.", true); }
+    if (/valida/.test(t)) { if (detail?.analysis) return validate("analysis", detail.analysis.id, "VALIDATED"); return respond("Aún no hay análisis para validar.", true); }
+    if (/implement|codigo|escribe.*prueba|genera.*prueba/.test(t)) return implement();
+    if (/(ejecuta|corre|corre la suite|lanza).*(prueba|suite|test|integracion)?/.test(t)) return executeRun();
+    return respond(`No entendí "${raw}". Di "ayuda" para ver lo que puedo hacer.`, true);
   }
 
   // Comando llegado por voz: se audita (canal VOICE) y se ejecuta igual que un clic.
@@ -286,6 +380,20 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
         <Btn tone="accent" disabled={!cmd.trim()}>ejecutar</Btn>
       </form>
 
+      {/* Ayuda de comandos (chips ejecutables) */}
+      <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <button type="button" onClick={() => setShowHelp((v) => !v)}
+          style={{ border: "none", background: "transparent", color: C.dim, fontFamily: MONO, fontSize: 10, cursor: "pointer", letterSpacing: 0.5 }}>
+          {showHelp ? "▾ comandos" : "▸ ¿qué puedo decir?"}
+        </button>
+        {showHelp && ["analiza este ticket", "genera el plan", "aprueba", "implementa", "ejecuta las pruebas", "haz todo el ciclo", "dame los KPIs", "qué riesgos hay", "el siguiente", "ayuda"].map((ex) => (
+          <button key={ex} type="button" onClick={() => runCommand(ex)}
+            style={{ fontFamily: MONO, fontSize: 10, padding: "3px 9px", borderRadius: 12, border: `1px solid ${C.line}`, background: C.panel2, color: C.dim, cursor: "pointer" }}>
+            {ex}
+          </button>
+        ))}
+      </div>
+
       {!dbOk && <div style={{ marginTop: 18, color: C.pending, fontFamily: MONO, fontSize: 12 }}>Base de datos no conectada. Configura DATABASE_URL y corre las migraciones.</div>}
 
       {/* KPI strip */}
@@ -332,7 +440,7 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
         <div>
           {!detail && <div style={{ color: C.faint, fontFamily: MONO, fontSize: 12, padding: 20 }}>Selecciona un requerimiento para dirigir su ciclo de calidad.</div>}
           {detail && <Detail detail={detail} busy={busy} isCTO={isCTO} showCode={showCode} setShowCode={setShowCode}
-            onAnalyze={analyze} onStrategy={strategy} onImplement={implement} onValidate={validate} />}
+            onAnalyze={analyze} onStrategy={strategy} onImplement={implement} onValidate={validate} onExecute={executeRun} />}
         </div>
       </div>
 
@@ -372,7 +480,7 @@ function NewRequirement({ onCreate, disabled, busy }: any) {
 const inp: React.CSSProperties = { background: C.bg, border: `1px solid ${C.lineHi}`, borderRadius: 6, color: C.text, fontFamily: MONO, fontSize: 12, padding: "8px 10px", outline: "none" };
 
 // ── Panel de detalle: dirige cada fase ────────────────────────────────────────
-function Detail({ detail, busy, isCTO, showCode, setShowCode, onAnalyze, onStrategy, onImplement, onValidate }: any) {
+function Detail({ detail, busy, isCTO, showCode, setShowCode, onAnalyze, onStrategy, onImplement, onValidate, onExecute }: any) {
   const a = detail.analysis;
   const s = detail.strategy;
   const analysisOk = a && (a.validationStatus === "VALIDATED" || a.validationStatus === "CORRECTED");
@@ -486,10 +594,11 @@ function Detail({ detail, busy, isCTO, showCode, setShowCode, onAnalyze, onStrat
         )}
       </Section>
 
-      {/* M4 · Ejecución (informativo; la ingesta llega por CI) */}
-      <Section n={4} title="Ejecución" subtitle="Los resultados llegan del CI vía POST /api/runs.">
-        <div style={{ fontFamily: MONO, fontSize: 11, color: C.dim }}>
-          Conecta el pipeline (GitHub Actions) y los resultados se enlazan a estos artefactos automáticamente.
+      {/* M4 · Ejecución (en la demo se simula; en prod la ingesta llega por CI) */}
+      <Section n={4} title="Ejecución" subtitle="En producción llega del CI; aquí puedes simularla." locked={artifacts.length === 0} lockMsg="Genera el código primero.">
+        <Btn onClick={onExecute} disabled={isCTO || busy === "run"}>{busy === "run" ? "ejecutando…" : "▶ ejecutar pruebas (demo)"}</Btn>
+        <div style={{ marginTop: 8, fontFamily: MONO, fontSize: 10, color: C.faint }}>
+          En producción, GitHub Actions envía resultados a POST /api/runs y se enlazan a estos artefactos.
         </div>
       </Section>
     </div>
