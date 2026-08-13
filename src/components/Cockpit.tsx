@@ -109,6 +109,7 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<any>(null);
   const [kpis, setKpis] = useState<any>(null);
+  const [series, setSeries] = useState<any[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; err?: boolean } | null>(null);
   const [cmd, setCmd] = useState("");
@@ -142,9 +143,10 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
   }, [projectName]);
 
   const loadKpis = useCallback(async (s: string | null) => {
-    if (!s) { setKpis(null); return; }
+    if (!s) { setKpis(null); setSeries([]); return; }
     const r = await fetch(`/api/kpis?slug=${s}`).then((x) => x.json());
     setKpis(r.kpis ?? null);
+    setSeries(r.confidenceSeries ?? []);
   }, []);
 
   const loadDetail = useCallback(async (id: string) => {
@@ -405,64 +407,60 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
 
       {!dbOk && <div style={{ marginTop: 18, color: C.pending, fontFamily: MONO, fontSize: 12 }}>Base de datos no conectada. Configura DATABASE_URL y corre las migraciones.</div>}
 
-      {/* KPI strip */}
-      {kpis && (
-        <div className="bt-stagger" style={{ display: "flex", gap: 14, marginTop: 18, alignItems: "stretch" }}>
-          <div className="bt-kpi bt-glass" style={{ background: "linear-gradient(150deg, rgba(56,189,248,.14), rgba(168,85,247,.10) 55%, rgba(245,158,11,.06)), rgba(17,21,32,.5)", border: `1px solid ${C.lineHi}`, borderRadius: 16, padding: "18px 28px", display: "flex", alignItems: "center", gap: 20, boxShadow: `0 0 60px rgba(56,189,248,.18)` }}>
-            <Ring pct={conf} />
+      {/* ── Vista MÉTRICAS: dashboard completo ─────────────────────────────────── */}
+      {kpis && isCTO && <MetricsDashboard kpis={kpis} series={series} conf={conf} onOperate={() => setRole("QA_AGENTIC")} />}
+
+      {/* ── Vista QA AGÉNTICO: requerimientos + fases del ciclo ────────────────── */}
+      {!isCTO && (
+        <>
+          {kpis && (
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16, fontFamily: MONO, fontSize: 11, color: C.dim }}>
+              <span>confianza <b style={{ color: conf >= 75 ? C.human : conf >= 45 ? C.pending : C.reject, fontSize: 13 }}>{conf}</b></span>
+              <span style={{ color: C.faint }}>·</span>
+              <span>{list.length} requerimiento(s)</span>
+              <span style={{ color: C.faint }}>·</span>
+              <span>aceptación IA {Math.round((kpis.process.aiCases.acceptanceRate || 0) * 100)}%</span>
+              <span style={{ flex: 1 }} />
+              <button className="bt-chip" onClick={() => setRole("CTO")} style={{ fontFamily: MONO, fontSize: 10, padding: "4px 10px", borderRadius: 12, border: `1px solid ${C.line}`, background: C.panel2, color: C.dim, cursor: "pointer" }}>ver métricas →</button>
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 14, marginTop: 14 }}>
+            {/* Lista */}
             <div>
-              <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 2, color: C.dim }}>SCORE DE CONFIANZA</div>
-              <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6, maxWidth: 190, lineHeight: 1.35 }}>
-                Un número, auditable, del estado real de calidad.
+              <NewRequirement onCreate={createReq} disabled={isCTO} busy={busy === "create"} />
+              <div style={{ marginTop: 12, fontFamily: MONO, fontSize: 10, letterSpacing: 1.6, color: C.dim }}>REQUERIMIENTOS</div>
+              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                {list.length === 0 && <div style={{ color: C.faint, fontFamily: MONO, fontSize: 11 }}>Ninguno todavía.</div>}
+                {list.map((r) => {
+                  const active = r.id === selectedId;
+                  const idx = PHASES.indexOf(r.currentPhase);
+                  return (
+                    <div key={r.id} onClick={() => setSelectedId(r.id)} className="bt-card" style={{
+                      background: active ? C.panel : C.panel2, border: `1px solid ${active ? C.accent : C.line}`, borderRadius: 8, padding: "10px 12px", cursor: "pointer",
+                      boxShadow: active ? `0 0 0 1px ${C.glow}, 0 8px 24px rgba(0,0,0,.3)` : "none",
+                    }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3 }}>{r.title}</div>
+                      <div style={{ display: "flex", gap: 4, marginTop: 8 }}>
+                        {PHASES.map((p, i) => (
+                          <span key={p} style={{ height: 3, flex: 1, borderRadius: 2, background: i <= idx ? C.accent : C.line }} />
+                        ))}
+                      </div>
+                      <div style={{ marginTop: 6, fontFamily: MONO, fontSize: 9, color: C.dim }}>{PHASE_LABEL[r.currentPhase]}</div>
+                    </div>
+                  );
+                })}
               </div>
-              <div style={{ fontFamily: MONO, fontSize: 10, color: C.faint, marginTop: 8 }}>0–100 · calculado en vivo</div>
+            </div>
+
+            {/* Detalle */}
+            <div>
+              {!detail && <div style={{ color: C.faint, fontFamily: MONO, fontSize: 12, padding: 20 }}>Selecciona un requerimiento para dirigir su ciclo de calidad.</div>}
+              {detail && <Detail detail={detail} busy={busy} isCTO={isCTO} showCode={showCode} setShowCode={setShowCode}
+                onAnalyze={analyze} onStrategy={strategy} onImplement={implement} onValidate={validate} onExecute={executeRun} />}
             </div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, flex: 1 }}>
-            <Kpi Icon={CheckCircle2} label="CASOS IA ACEPTADOS" value={`${Math.round((kpis.process.aiCases.acceptanceRate || 0) * 100)}%`} sub={`${kpis.process.aiCases.validated}/${kpis.process.aiCases.total} sin corrección`} />
-            <Kpi Icon={Layers} label="COBERTURA PIRÁMIDE" value={`${Math.round((kpis.process.pyramidCoverage || 0) * 100)}%`} sub="ejecutados / decididos" />
-            <Kpi Icon={Bug} label="DEFECTOS ESCAPADOS" value={`${kpis.quality.escapedToProd}`} sub={`${kpis.quality.caughtEarly} atrapados temprano`} color={kpis.quality.escapedToProd ? C.reject : C.human} />
-            <Kpi Icon={DollarSign} label="COSTO EVITADO" value={`$${Math.round(kpis.business.costAvoidedUsd || 0).toLocaleString()}`} sub={`${(kpis.business.qaHoursSaved || 0).toFixed(1)}h QA`} color={C.human} />
-          </div>
-        </div>
+        </>
       )}
-
-      {/* Cuerpo: lista + detalle */}
-      <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 14, marginTop: 18 }}>
-        {/* Lista */}
-        <div>
-          <NewRequirement onCreate={createReq} disabled={isCTO} busy={busy === "create"} />
-          <div style={{ marginTop: 12, fontFamily: MONO, fontSize: 10, letterSpacing: 1.6, color: C.dim }}>REQUERIMIENTOS</div>
-          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
-            {list.length === 0 && <div style={{ color: C.faint, fontFamily: MONO, fontSize: 11 }}>Ninguno todavía.</div>}
-            {list.map((r) => {
-              const active = r.id === selectedId;
-              const idx = PHASES.indexOf(r.currentPhase);
-              return (
-                <div key={r.id} onClick={() => setSelectedId(r.id)} className="bt-card" style={{
-                  background: active ? C.panel : C.panel2, border: `1px solid ${active ? C.accent : C.line}`, borderRadius: 8, padding: "10px 12px", cursor: "pointer",
-                  boxShadow: active ? `0 0 0 1px ${C.glow}, 0 8px 24px rgba(0,0,0,.3)` : "none",
-                }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3 }}>{r.title}</div>
-                  <div style={{ display: "flex", gap: 4, marginTop: 8 }}>
-                    {PHASES.map((p, i) => (
-                      <span key={p} style={{ height: 3, flex: 1, borderRadius: 2, background: i <= idx ? C.accent : C.line }} />
-                    ))}
-                  </div>
-                  <div style={{ marginTop: 6, fontFamily: MONO, fontSize: 9, color: C.dim }}>{PHASE_LABEL[r.currentPhase]}</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Detalle */}
-        <div>
-          {!detail && <div style={{ color: C.faint, fontFamily: MONO, fontSize: 12, padding: 20 }}>Selecciona un requerimiento para dirigir su ciclo de calidad.</div>}
-          {detail && <Detail detail={detail} busy={busy} isCTO={isCTO} showCode={showCode} setShowCode={setShowCode}
-            onAnalyze={analyze} onStrategy={strategy} onImplement={implement} onValidate={validate} onExecute={executeRun} />}
-        </div>
-      </div>
 
       {/* Toast */}
       {toast && (
@@ -471,6 +469,167 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
         </div>
       )}
     </main>
+  );
+}
+
+// ── Vista MÉTRICAS: dashboard ──────────────────────────────────────────────────
+const LEVEL_LABEL: Record<string, string> = {
+  UNIT: "Unitario", COMPONENT: "Componente", INTEGRATION: "Integración", API: "API",
+  UI_E2E: "UI / E2E", PERFORMANCE: "Performance", SECURITY: "Seguridad",
+};
+
+function Panel({ title, children, hint }: any) {
+  return (
+    <div className="bt-section bt-glass" style={{ background: "linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0)), rgba(17,21,32,.5)", border: `1px solid ${C.lineHi}`, borderRadius: 14, padding: "16px 18px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 1.6, color: C.dim }}>{title}</div>
+        {hint && <div style={{ fontFamily: MONO, fontSize: 9, color: C.faint }}>{hint}</div>}
+      </div>
+      <div style={{ marginTop: 14 }}>{children}</div>
+    </div>
+  );
+}
+
+function Bar({ label, value, color }: { label: string; value: number; color?: string }) {
+  const pct = Math.round(Math.max(0, Math.min(1, value)) * 100);
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontFamily: MONO, fontSize: 11, color: C.dim, marginBottom: 5 }}>
+        <span>{label}</span><span style={{ color: C.text }}>{pct}%</span>
+      </div>
+      <div style={{ height: 8, borderRadius: 6, background: C.panel2, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${pct}%`, borderRadius: 6, background: color || "linear-gradient(90deg,#22d3ee,#3b82f6,#a855f7)", transition: "width 900ms var(--ease-out)" }} />
+      </div>
+    </div>
+  );
+}
+
+function Spark({ data }: { data: number[] }) {
+  if (data.length < 2) return <div style={{ fontFamily: MONO, fontSize: 11, color: C.faint }}>Sin historial todavía.</div>;
+  const w = 340, h = 80, pad = 6;
+  const max = 100, min = 0;
+  const pts = data.map((v, i) => {
+    const x = pad + (i / (data.length - 1)) * (w - pad * 2);
+    const y = h - pad - ((v - min) / (max - min)) * (h - pad * 2);
+    return [x, y];
+  });
+  const line = pts.map((p) => p.join(",")).join(" ");
+  const area = `${pad},${h - pad} ${line} ${w - pad},${h - pad}`;
+  const last = data[data.length - 1];
+  const col = last >= 75 ? C.human : last >= 45 ? C.pending : C.reject;
+  return (
+    <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
+      <defs>
+        <linearGradient id="btspark" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={col} stopOpacity="0.28" />
+          <stop offset="100%" stopColor={col} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon points={area} fill="url(#btspark)" />
+      <polyline points={line} fill="none" stroke={col} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r="3.5" fill={col} />
+    </svg>
+  );
+}
+
+function MiniStat({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div style={{ flex: 1, minWidth: 130 }}>
+      <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: 1.2, color: C.dim }}>{label}</div>
+      <div style={{ fontFamily: MONO, fontSize: 20, fontWeight: 800, color: color || C.text, marginTop: 4 }}>{value}</div>
+    </div>
+  );
+}
+
+function MetricsDashboard({ kpis, series, conf, onOperate }: any) {
+  const b = kpis.confidence.breakdown || {};
+  const ai = kpis.process.aiCases;
+  const cov = kpis.process.coverageByLevel || [];
+  const seg = [
+    { k: "validated", n: ai.validated, c: C.human, label: "validados" },
+    { k: "corrected", n: ai.corrected, c: C.accent, label: "corregidos" },
+    { k: "rejected", n: ai.rejected, c: C.reject, label: "rechazados" },
+    { k: "pending", n: ai.pending, c: C.pending, label: "pendientes" },
+  ];
+  const total = Math.max(1, ai.total);
+  const fmtH = (h: number | null) => (h == null ? "—" : h < 24 ? `${h.toFixed(1)} h` : `${(h / 24).toFixed(1)} d`);
+
+  return (
+    <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Hero: medidor + KPIs */}
+      <div className="bt-stagger" style={{ display: "flex", gap: 14, alignItems: "stretch" }}>
+        <div className="bt-kpi bt-glass" style={{ background: "linear-gradient(150deg, rgba(56,189,248,.14), rgba(168,85,247,.10) 55%, rgba(245,158,11,.06)), rgba(17,21,32,.5)", border: `1px solid ${C.lineHi}`, borderRadius: 16, padding: "18px 28px", display: "flex", alignItems: "center", gap: 20, boxShadow: `0 0 60px rgba(56,189,248,.18)` }}>
+          <Ring pct={conf} />
+          <div>
+            <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 2, color: C.dim }}>SCORE DE CONFIANZA</div>
+            <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6, maxWidth: 190, lineHeight: 1.35 }}>Un número, auditable, del estado real de calidad.</div>
+            <button className="bt-chip" onClick={onOperate} style={{ marginTop: 10, fontFamily: MONO, fontSize: 10, padding: "4px 10px", borderRadius: 12, border: `1px solid ${C.line}`, background: C.panel2, color: C.dim, cursor: "pointer" }}>← operar en QA</button>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, flex: 1 }}>
+          <Kpi Icon={CheckCircle2} label="CASOS IA ACEPTADOS" value={`${Math.round((ai.acceptanceRate || 0) * 100)}%`} sub={`${ai.validated}/${ai.total} sin corrección`} />
+          <Kpi Icon={Layers} label="COBERTURA PIRÁMIDE" value={`${Math.round((kpis.process.pyramidCoverage || 0) * 100)}%`} sub="ejecutados / decididos" />
+          <Kpi Icon={Bug} label="DEFECTOS ESCAPADOS" value={`${kpis.quality.escapedToProd}`} sub={`${kpis.quality.caughtEarly} atrapados temprano`} color={kpis.quality.escapedToProd ? C.reject : C.human} />
+          <Kpi Icon={DollarSign} label="COSTO EVITADO" value={`$${Math.round(kpis.business.costAvoidedUsd || 0).toLocaleString()}`} sub={`${(kpis.business.qaHoursSaved || 0).toFixed(1)}h QA ahorradas`} color={C.human} />
+        </div>
+      </div>
+
+      {/* Fila: desglose del score + aceptación IA */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <Panel title="DESGLOSE DEL SCORE DE CONFIANZA" hint="cómo se forma el número">
+          <Bar label="Pruebas que pasan (pass rate)" value={b.passRate ?? 0} />
+          <Bar label="Cobertura de la pirámide" value={b.pyramidCoverage ?? 0} />
+          <Bar label="Validación humana" value={b.validationRate ?? 0} />
+          <div style={{ fontFamily: MONO, fontSize: 10, color: b.escapedPenalty ? C.reject : C.faint, marginTop: 4 }}>
+            Penalización por defectos escapados: −{b.escapedPenalty ?? 0}
+          </div>
+        </Panel>
+        <Panel title="ACEPTACIÓN DE CASOS GENERADOS POR IA" hint={`${ai.total} artefacto(s)`}>
+          <div style={{ display: "flex", height: 14, borderRadius: 7, overflow: "hidden", background: C.panel2 }}>
+            {seg.map((s) => s.n > 0 && (
+              <div key={s.k} title={`${s.label}: ${s.n}`} style={{ width: `${(s.n / total) * 100}%`, background: s.c, transition: "width 900ms var(--ease-out)" }} />
+            ))}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12 }}>
+            {seg.map((s) => (
+              <span key={s.k} style={{ fontFamily: MONO, fontSize: 10, color: C.dim, display: "flex", alignItems: "center", gap: 5 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: s.c }} /> {s.label} <b style={{ color: C.text }}>{s.n}</b>
+              </span>
+            ))}
+          </div>
+        </Panel>
+      </div>
+
+      {/* Fila: cobertura por nivel + evolución */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <Panel title="COBERTURA POR NIVEL — PIRÁMIDE DE COHN" hint="decidido vs ejecutado">
+          {cov.length === 0 && <div style={{ fontFamily: MONO, fontSize: 11, color: C.faint }}>Sin estrategia todavía.</div>}
+          {cov.map((c: any) => (
+            <div key={c.level} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 9 }}>
+              <span style={{ width: 120, fontFamily: MONO, fontSize: 11, color: C.text }}>{LEVEL_LABEL[c.level] || c.level}</span>
+              <span style={{ fontFamily: MONO, fontSize: 10, padding: "2px 8px", borderRadius: 10, border: `1px solid ${C.accent}`, color: C.accent }}>decidido</span>
+              <span style={{ fontFamily: MONO, fontSize: 10, padding: "2px 8px", borderRadius: 10, border: `1px solid ${c.executed ? C.human : C.line}`, color: c.executed ? C.human : C.faint }}>
+                {c.executed ? "✓ ejecutado" : "sin ejecutar"}
+              </span>
+            </div>
+          ))}
+        </Panel>
+        <Panel title="EVOLUCIÓN DE LA CONFIANZA" hint="en el tiempo">
+          <Spark data={(series || []).map((s: any) => s.score)} />
+        </Panel>
+      </div>
+
+      {/* Fila: proceso / calidad / negocio */}
+      <Panel title="PROCESO · CALIDAD · NEGOCIO">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 20 }}>
+          <MiniStat label="ANÁLISIS → PLAN" value={kpis.process.avgAnalysisToPlanMin != null ? `${Math.round(kpis.process.avgAnalysisToPlanMin)} min` : "—"} />
+          <MiniStat label="T. MEDIO DETECCIÓN" value={fmtH(kpis.quality.meanTimeToDetectH)} />
+          <MiniStat label="DEFECTOS TEMPRANOS" value={`${kpis.quality.caughtEarly}`} color={C.human} />
+          <MiniStat label="HORAS QA AHORRADAS" value={`${(kpis.business.qaHoursSaved || 0).toFixed(1)} h`} color={C.human} />
+          <MiniStat label="REDUCCIÓN vs BASELINE" value={`${kpis.business.escapedReductionVsBaseline}/${kpis.business.baselineEscapedPerMonth} mes`} />
+        </div>
+      </Panel>
+    </div>
   );
 }
 
