@@ -52,11 +52,11 @@ function Badge({ origin, status }: { origin?: string; status?: string }) {
 function Btn({ children, onClick, disabled, tone = "accent", title }: any) {
   const col = tone === "reject" ? C.reject : tone === "muted" ? C.dim : C.accent;
   return (
-    <button onClick={onClick} disabled={disabled} title={title}
+    <button onClick={onClick} disabled={disabled} title={title} className="bt-btn"
       style={{
         fontFamily: MONO, fontSize: 11, letterSpacing: 0.3, padding: "6px 12px", borderRadius: 6, cursor: disabled ? "not-allowed" : "pointer",
-        background: disabled ? "transparent" : "rgba(61,220,151,.06)", color: disabled ? C.faint : col,
-        border: `1px solid ${disabled ? C.line : col}`, opacity: disabled ? 0.5 : 1, transition: "all .15s",
+        background: disabled ? "transparent" : "rgba(56,189,248,.08)", color: disabled ? C.faint : col,
+        border: `1px solid ${disabled ? C.line : col}`, opacity: disabled ? 0.5 : 1,
       }}>
       {children}
     </button>
@@ -80,7 +80,7 @@ function Ring({ pct }: { pct: number }) {
 
 function Kpi({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
-    <div style={{ background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 8, padding: "10px 14px", flex: 1, minWidth: 120 }}>
+    <div className="bt-kpi" style={{ background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 8, padding: "10px 14px", flex: 1, minWidth: 120 }}>
       <div style={{ color: C.dim, fontFamily: MONO, fontSize: 9, letterSpacing: 1.3 }}>{label}</div>
       <div style={{ color: color || C.text, fontFamily: MONO, fontSize: 22, fontWeight: 700, marginTop: 4 }}>{value}</div>
       {sub && <div style={{ color: C.faint, fontFamily: MONO, fontSize: 9, marginTop: 1 }}>{sub}</div>}
@@ -338,7 +338,7 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
   return (
     <main style={{ ...BG_STYLE, minHeight: "100vh", color: C.text, fontFamily: SANS, padding: "22px 26px" }}>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 14, borderBottom: `1px solid ${C.line}`, paddingBottom: 14 }}>
+      <div className="bt-header" style={{ display: "flex", alignItems: "center", gap: 14, borderBottom: `1px solid ${C.line}`, padding: "16px 26px 14px", margin: "-22px -26px 0" }}>
         <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, letterSpacing: 1, background: BRAND, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>BEATRICE<span style={{ color: "#f59e0b", WebkitTextFillColor: "#f59e0b" }}>.</span></div>
         <div style={{ color: C.dim, fontFamily: MONO, fontSize: 11 }}>cockpit de QA agéntico</div>
         <div style={{ flex: 1 }} />
@@ -358,13 +358,13 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
       {/* Command bar */}
       <form onSubmit={(e) => { e.preventDefault(); if (cmd.trim()) { runCommand(cmd); setCmd(""); } }}
         style={{ display: "flex", gap: 8, marginTop: 14 }}>
-        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, background: C.panel, border: `1px solid ${listening ? C.reject : C.lineHi}`, borderRadius: 8, padding: "8px 12px", boxShadow: listening ? `0 0 0 3px rgba(251,90,118,.15)` : "none", transition: "all .2s" }}>
+        <div className="bt-cmdbar" style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, background: "rgba(17,21,32,.72)", border: `1px solid ${listening ? C.reject : C.lineHi}`, borderRadius: 8, padding: "8px 12px", boxShadow: listening ? `0 0 0 3px rgba(251,90,118,.15)` : "none" }}>
           <span style={{ color: listening ? C.reject : C.accent, fontFamily: MONO, fontSize: 13 }}>{listening ? "●" : "▮"}</span>
           <input value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder={listening ? "Escuchando…" : 'Dile a Beatrice: "analiza este ticket", "genera el plan", "aprueba", "implementa"…'}
             style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: C.text, fontFamily: MONO, fontSize: 12 }} />
           {voiceOk ? (
             <>
-              <button type="button" onClick={toggleMic} disabled={isCTO} title={isCTO ? "La vista Métricas no opera" : listening ? "Detener" : "Hablar a Beatrice"}
+              <button type="button" onClick={toggleMic} disabled={isCTO} className={listening ? "bt-mic-live" : "bt-btn"} title={isCTO ? "La vista Métricas no opera" : listening ? "Detener" : "Hablar a Beatrice"}
                 style={{ border: "none", background: "transparent", cursor: isCTO ? "not-allowed" : "pointer", color: listening ? C.reject : C.accent, fontSize: 15, opacity: isCTO ? 0.4 : 1 }}>
                 {listening ? "◼" : "🎤"}
               </button>
@@ -387,7 +387,7 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
           {showHelp ? "▾ comandos" : "▸ ¿qué puedo decir?"}
         </button>
         {showHelp && ["analiza este ticket", "genera el plan", "aprueba", "implementa", "ejecuta las pruebas", "haz todo el ciclo", "dame los KPIs", "qué riesgos hay", "el siguiente", "ayuda"].map((ex) => (
-          <button key={ex} type="button" onClick={() => runCommand(ex)}
+          <button key={ex} type="button" onClick={() => runCommand(ex)} className="bt-chip"
             style={{ fontFamily: MONO, fontSize: 10, padding: "3px 9px", borderRadius: 12, border: `1px solid ${C.line}`, background: C.panel2, color: C.dim, cursor: "pointer" }}>
             {ex}
           </button>
@@ -398,8 +398,8 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
 
       {/* KPI strip */}
       {kpis && (
-        <div style={{ display: "flex", gap: 12, marginTop: 16, alignItems: "stretch" }}>
-          <div style={{ background: `linear-gradient(180deg, rgba(56,189,248,.08), rgba(168,85,247,.05)), ${C.panel2}`, border: `1px solid ${C.lineHi}`, borderRadius: 8, padding: "8px 16px", display: "flex", alignItems: "center", boxShadow: `0 0 34px ${C.glow}` }}><Ring pct={conf} /></div>
+        <div className="bt-stagger" style={{ display: "flex", gap: 12, marginTop: 16, alignItems: "stretch" }}>
+          <div className="bt-kpi" style={{ background: `linear-gradient(180deg, rgba(56,189,248,.08), rgba(168,85,247,.05)), ${C.panel2}`, border: `1px solid ${C.lineHi}`, borderRadius: 8, padding: "8px 16px", display: "flex", alignItems: "center", boxShadow: `0 0 34px ${C.glow}` }}><Ring pct={conf} /></div>
           <Kpi label="CASOS IA ACEPTADOS" value={`${Math.round((kpis.process.aiCases.acceptanceRate || 0) * 100)}%`} sub={`${kpis.process.aiCases.validated}/${kpis.process.aiCases.total} sin corrección`} />
           <Kpi label="COBERTURA PIRÁMIDE" value={`${Math.round((kpis.process.pyramidCoverage || 0) * 100)}%`} sub="ejecutados / decididos" />
           <Kpi label="DEFECTOS ESCAPADOS" value={`${kpis.quality.escapedToProd}`} sub={`${kpis.quality.caughtEarly} atrapados temprano`} color={kpis.quality.escapedToProd ? C.reject : C.human} />
@@ -419,9 +419,9 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
               const active = r.id === selectedId;
               const idx = PHASES.indexOf(r.currentPhase);
               return (
-                <div key={r.id} onClick={() => setSelectedId(r.id)} style={{
+                <div key={r.id} onClick={() => setSelectedId(r.id)} className="bt-card" style={{
                   background: active ? C.panel : C.panel2, border: `1px solid ${active ? C.accent : C.line}`, borderRadius: 8, padding: "10px 12px", cursor: "pointer",
-                  boxShadow: active ? `0 0 0 1px ${C.glow}` : "none",
+                  boxShadow: active ? `0 0 0 1px ${C.glow}, 0 8px 24px rgba(0,0,0,.3)` : "none",
                 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3 }}>{r.title}</div>
                   <div style={{ display: "flex", gap: 4, marginTop: 8 }}>
@@ -446,7 +446,7 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
 
       {/* Toast */}
       {toast && (
-        <div style={{ position: "fixed", bottom: 22, right: 22, background: C.panel, border: `1px solid ${toast.err ? C.reject : C.accent}`, color: toast.err ? C.reject : C.text, fontFamily: MONO, fontSize: 12, padding: "10px 16px", borderRadius: 8, maxWidth: 420, boxShadow: "0 8px 30px rgba(0,0,0,.5)" }}>
+        <div className="bt-toast" style={{ position: "fixed", bottom: 22, right: 22, background: "rgba(17,21,32,.9)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", border: `1px solid ${toast.err ? C.reject : C.accent}`, color: toast.err ? C.reject : C.text, fontFamily: MONO, fontSize: 12, padding: "10px 16px", borderRadius: 8, maxWidth: 420, boxShadow: "0 8px 30px rgba(0,0,0,.5)" }}>
           {toast.msg}
         </div>
       )}
@@ -607,7 +607,7 @@ function Detail({ detail, busy, isCTO, showCode, setShowCode, onAnalyze, onStrat
 
 function Section({ n, title, subtitle, children, locked, lockMsg }: any) {
   return (
-    <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, padding: "14px 16px", opacity: locked ? 0.6 : 1 }}>
+    <div className="bt-section" style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, padding: "14px 16px", opacity: locked ? 0.6 : 1 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
         <span style={{ fontFamily: MONO, fontSize: 10, color: C.accent, border: `1px solid ${C.accent}`, borderRadius: 4, padding: "1px 6px" }}>M{n}</span>
         <span style={{ fontSize: 14, fontWeight: 700 }}>{title}</span>
