@@ -196,7 +196,55 @@ async function main() {
     ],
   });
 
-  console.log("Seed OK · proyecto:", project.slug, "· requerimientos:", 2 + EXTRA.length);
+  // ── Más clientes y proyectos (vista multi-proyecto realista) ─────────────────
+  let total = 2 + EXTRA.length;
+
+  // Acme Corp tiene un segundo proyecto (multi-proyecto por cliente).
+  total += await addProject("Acme Corp", "Checkout Web (E2E)", "checkout-web", qa.name, [
+    { title: "Flujo de checkout en 3 pasos", areas: ["UI"], phase: "EXECUTION", days: 10, accept: "clean" },
+    { title: "Aplicar cupón en el carrito", areas: ["UI", "API"], phase: "EXECUTION", days: 9, accept: "mixed" },
+    { title: "Validación del formulario de pago", areas: ["UI"], dataSensitive: true, phase: "IMPLEMENTATION", days: 7, accept: "pending" },
+    { title: "Selección de método de envío", areas: ["UI"], phase: "DESIGN", days: 5 },
+    { title: "Carrito persistente entre sesiones", areas: ["UI", "API"], phase: "ANALYSIS", days: 3 },
+    { title: "Página de confirmación de pedido", areas: ["UI"], phase: "ANALYSIS", days: 2, analysisPending: true },
+  ], { reuseClient: client });
+
+  total += await addProject("Nimbus Retail", "Inventory Sync API", "inventory-api", qa.name, [
+    { title: "Sincronización de stock con ERP", areas: ["API", "INTEGRATION", "PERFORMANCE"], phase: "EXECUTION", days: 12, accept: "clean", defect: { title: "Desfase de stock tras timeout del ERP" } },
+    { title: "Webhook de actualización de precios", areas: ["INTEGRATION", "API"], phase: "EXECUTION", days: 10, accept: "mixed" },
+    { title: "Reserva de stock concurrente", areas: ["API", "PERFORMANCE"], phase: "EXECUTION", days: 9, accept: "clean", defect: { title: "Sobreventa bajo alta concurrencia" } },
+    { title: "Auditoría de movimientos de inventario", areas: ["API"], phase: "CLOSURE", days: 15, accept: "clean" },
+    { title: "Alta de producto vía API", areas: ["API"], phase: "IMPLEMENTATION", days: 6, accept: "clean" },
+    { title: "Importación masiva por CSV", areas: ["API", "PERFORMANCE"], phase: "IMPLEMENTATION", days: 5, accept: "pending" },
+    { title: "Reporte de quiebres de stock", areas: ["API"], phase: "DESIGN", days: 4 },
+    { title: "Soporte multi-bodega", areas: ["API"], phase: "ANALYSIS", days: 2 },
+  ]);
+
+  total += await addProject("Volta Bank", "Core Banking API", "core-banking", qa.name, [
+    { title: "Transferencia entre cuentas", areas: ["API", "SECURITY"], dataSensitive: true, phase: "EXECUTION", days: 11, accept: "clean", securityFails: true, defect: { title: "Doble débito ante reintento" } },
+    { title: "Autenticación multifactor (MFA)", areas: ["API", "SECURITY", "INTEGRATION"], dataSensitive: true, thirdParties: ["Twilio (SMS)"], phase: "EXECUTION", days: 10, accept: "clean", securityFails: true },
+    { title: "Consulta de saldo y movimientos", areas: ["API"], dataSensitive: true, phase: "CLOSURE", days: 16, accept: "clean" },
+    { title: "Bloqueo y desbloqueo de tarjeta", areas: ["API", "SECURITY"], dataSensitive: true, phase: "IMPLEMENTATION", days: 7, accept: "mixed" },
+    { title: "Límites de transacción diarios", areas: ["API", "SECURITY"], dataSensitive: true, phase: "IMPLEMENTATION", days: 6, accept: "rejected" },
+    { title: "Detección de fraude en tiempo real", areas: ["API", "INTEGRATION", "PERFORMANCE"], phase: "DESIGN", days: 5 },
+    { title: "Estado de cuenta en PDF", areas: ["API"], phase: "ANALYSIS", days: 3 },
+  ]);
+
+  console.log("Seed OK ·", total, "requerimientos · 4 proyectos · 3 clientes");
+}
+
+// Crea (o reutiliza) un cliente + su proyecto y lo puebla con los specs dados.
+async function addProject(clientName, name, slug, qaName, specs, opts = {}) {
+  const client = opts.reuseClient || (await prisma.client.create({ data: { name: clientName } }));
+  if (!opts.reuseClient) await prisma.baselineConfig.create({ data: { clientId: client.id } });
+  const project = await prisma.project.upsert({
+    where: { slug }, update: { clientId: client.id, name }, create: { slug, name, clientId: client.id },
+  });
+  for (const spec of specs) await makeReq(project, qaName, spec);
+  for (let i = 5; i >= 0; i--) {
+    await prisma.confidenceSnapshot.create({ data: { projectId: project.id, score: 38 + (5 - i) * 7, breakdown: {}, computedAt: daysAgo(i) } });
+  }
+  return specs.length;
 }
 
 // ── Generador compacto de requerimientos según su fase objetivo ────────────────

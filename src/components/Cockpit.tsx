@@ -110,6 +110,7 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
   const [detail, setDetail] = useState<any>(null);
   const [kpis, setKpis] = useState<any>(null);
   const [series, setSeries] = useState<any[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; err?: boolean } | null>(null);
   const [cmd, setCmd] = useState("");
@@ -133,7 +134,12 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
     setVoiceOk(getRecognizer().supported() && getSpeaker().supported());
     // Precarga las voces del navegador (algunas las cargan de forma diferida).
     if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.getVoices();
+    // Lista de proyectos para el selector multi-proyecto.
+    fetch("/api/projects").then((r) => r.json()).then((d) => setProjects(d.projects || [])).catch(() => {});
   }, []);
+
+  // Cambia de proyecto: limpia la selección/detalle; los datos se recargan por el efecto de `slug`.
+  const switchProject = (s: string) => { setSlug(s); setSelectedId(null); setDetail(null); };
 
   const loadList = useCallback(async (s: string | null) => {
     if (!s) { setList([]); return; }
@@ -353,7 +359,21 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
         <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, letterSpacing: 1, background: BRAND, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>BEATRICE<span style={{ color: "#f59e0b", WebkitTextFillColor: "#f59e0b" }}>.</span></div>
         <div style={{ color: C.dim, fontFamily: MONO, fontSize: 11 }}>cockpit de QA agéntico</div>
         <div style={{ flex: 1 }} />
-        <div style={{ color: C.dim, fontFamily: MONO, fontSize: 11 }}>{projectName ? `proyecto · ${projectName}` : "sin proyecto"}</div>
+        {projects.length > 1 ? (
+          <>
+            <span style={{ color: C.faint, fontFamily: MONO, fontSize: 10 }}>proyecto</span>
+            <select value={slug ?? ""} onChange={(e) => switchProject(e.target.value)} title="Cambiar de proyecto"
+              style={{ fontFamily: MONO, fontSize: 11, color: C.text, background: C.panel, border: `1px solid ${C.lineHi}`, borderRadius: 6, padding: "5px 8px", cursor: "pointer", outline: "none", maxWidth: 260 }}>
+              {Object.entries(projects.reduce((a: any, p: any) => { (a[p.client] = a[p.client] || []).push(p); return a; }, {})).map(([cli, ps]: any) => (
+                <optgroup key={cli} label={cli}>
+                  {ps.map((p: any) => <option key={p.slug} value={p.slug}>{p.name}</option>)}
+                </optgroup>
+              ))}
+            </select>
+          </>
+        ) : (
+          <div style={{ color: C.dim, fontFamily: MONO, fontSize: 11 }}>{projectName ? `proyecto · ${projectName}` : "sin proyecto"}</div>
+        )}
         {/* Cambio de vista por rol: QA agéntico opera; CTO sólo observa (KPIs y confianza). */}
         <span style={{ color: C.faint, fontFamily: MONO, fontSize: 10 }}>vista</span>
         <div style={{ display: "flex", border: `1px solid ${C.line}`, borderRadius: 6, overflow: "hidden" }}>
