@@ -58,13 +58,13 @@ export async function computeKpis(projectId: string) {
   const avgAnalysisToPlanMin = deltas.length ? deltas.reduce((a, x) => a + x, 0) / deltas.length : null;
 
   // Cobertura real por nivel de pirámide: niveles con resultados vs niveles decididos.
+  // Se agrega sobre los runs recientes (no solo el último) para reflejar el proyecto completo.
   const decidedLevels = new Set(decisions.map((d) => d.level));
   const executedLevels = new Set<string>();
-  const latest = runs[0];
   let passed = 0;
   let executed = 0;
-  if (latest) {
-    for (const r of latest.results) {
+  for (const run of runs) {
+    for (const r of run.results) {
       executed++;
       if (r.status === "passed") passed++;
       const lvl = r.artifact?.decision?.level;
