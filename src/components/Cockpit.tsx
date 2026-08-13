@@ -1,6 +1,7 @@
 "use client";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getRecognizer, getSpeaker } from "@/lib/voice";
+import { CheckCircle2, Layers, Bug, DollarSign } from "lucide-react";
 
 // ── Tema "centro de mando" · identidad Detrás del Algoritmo (azul-noche + gradientes) ──
 const C = {
@@ -11,10 +12,6 @@ const C = {
 };
 // Gradiente de marca (cian → azul → púrpura → naranja), como el sitio.
 const BRAND = "linear-gradient(90deg,#22d3ee,#3b82f6,#a855f7,#f59e0b)";
-// Fondo con glow superior para que no se sienta plano/negro.
-const BG_STYLE: React.CSSProperties = {
-  background: `radial-gradient(1200px 480px at 50% -140px, rgba(59,130,246,.18), transparent 60%), radial-gradient(900px 420px at 90% -80px, rgba(168,85,247,.12), transparent 55%), ${C.bg}`,
-};
 const MONO = "'JetBrains Mono','Fira Code',ui-monospace,SFMono-Regular,Menlo,monospace";
 const SANS = "ui-sans-serif,system-ui,-apple-system,sans-serif";
 
@@ -63,27 +60,38 @@ function Btn({ children, onClick, disabled, tone = "accent", title }: any) {
   );
 }
 
-function Ring({ pct }: { pct: number }) {
-  const size = 92, r = size / 2 - 8, circ = 2 * Math.PI * r;
+function Ring({ pct, size = 152 }: { pct: number; size?: number }) {
+  const r = size / 2 - 11, circ = 2 * Math.PI * r;
   const col = pct >= 75 ? C.human : pct >= 45 ? C.pending : C.reject;
   return (
-    <svg width={size} height={size} style={{ display: "block" }}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={C.line} strokeWidth="7" />
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={col} strokeWidth="7"
+    <svg width={size} height={size} style={{ display: "block", overflow: "visible" }}>
+      <defs>
+        <linearGradient id="btring" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#22d3ee" />
+          <stop offset="55%" stopColor="#3b82f6" />
+          <stop offset="100%" stopColor="#a855f7" />
+        </linearGradient>
+      </defs>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={C.line} strokeWidth="10" />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="url(#btring)" strokeWidth="10"
         strokeDasharray={circ} strokeDashoffset={circ - (pct / 100) * circ} strokeLinecap="round"
-        transform={`rotate(-90 ${size / 2} ${size / 2})`} style={{ transition: "stroke-dashoffset .9s cubic-bezier(.4,0,.2,1)" }} />
-      <text x="50%" y="52%" textAnchor="middle" fill={C.text} style={{ fontFamily: MONO, fontSize: 24, fontWeight: 700 }}>{pct}</text>
-      <text x="50%" y="70%" textAnchor="middle" fill={C.dim} style={{ fontFamily: MONO, fontSize: 7, letterSpacing: 1.5 }}>CONFIANZA</text>
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        style={{ transition: "stroke-dashoffset 1s var(--ease-out)", filter: `drop-shadow(0 0 10px ${col}66)` }} />
+      <text x="50%" y="48%" textAnchor="middle" fill={C.text} style={{ fontFamily: MONO, fontSize: 46, fontWeight: 800, letterSpacing: -1 }}>{pct}</text>
+      <text x="50%" y="65%" textAnchor="middle" fill={C.dim} style={{ fontFamily: MONO, fontSize: 9, letterSpacing: 3 }}>CONFIANZA</text>
     </svg>
   );
 }
 
-function Kpi({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
+function Kpi({ label, value, sub, color, Icon }: { label: string; value: string; sub?: string; color?: string; Icon?: any }) {
   return (
-    <div className="bt-kpi" style={{ background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 8, padding: "10px 14px", flex: 1, minWidth: 120 }}>
-      <div style={{ color: C.dim, fontFamily: MONO, fontSize: 9, letterSpacing: 1.3 }}>{label}</div>
-      <div style={{ color: color || C.text, fontFamily: MONO, fontSize: 22, fontWeight: 700, marginTop: 4 }}>{value}</div>
-      {sub && <div style={{ color: C.faint, fontFamily: MONO, fontSize: 9, marginTop: 1 }}>{sub}</div>}
+    <div className="bt-kpi bt-glass" style={{ background: "linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,0)), rgba(17,21,32,.55)", border: `1px solid ${C.lineHi}`, borderRadius: 12, padding: "14px 16px", flex: 1, minWidth: 150 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+        {Icon && <Icon size={13} color={color || C.accent} />}
+        <div style={{ color: C.dim, fontFamily: MONO, fontSize: 9, letterSpacing: 1.4 }}>{label}</div>
+      </div>
+      <div style={{ color: color || C.text, fontFamily: MONO, fontSize: 30, fontWeight: 800, marginTop: 8, letterSpacing: -0.5 }}>{value}</div>
+      {sub && <div style={{ color: C.faint, fontFamily: MONO, fontSize: 9, marginTop: 3 }}>{sub}</div>}
     </div>
   );
 }
@@ -336,7 +344,8 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
   const conf = kpis?.confidence?.score ?? 0;
 
   return (
-    <main style={{ ...BG_STYLE, minHeight: "100vh", color: C.text, fontFamily: SANS, padding: "22px 26px" }}>
+    <main style={{ position: "relative", overflowX: "hidden", minHeight: "100vh", color: C.text, fontFamily: SANS, padding: "22px 26px" }}>
+      <div className="bt-aurora" aria-hidden><i className="b1" /><i className="b2" /><i className="b3" /><i className="b4" /><span className="grid" /></div>
       {/* Header */}
       <div className="bt-header" style={{ display: "flex", alignItems: "center", gap: 14, borderBottom: `1px solid ${C.line}`, padding: "16px 26px 14px", margin: "-22px -26px 0" }}>
         <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, letterSpacing: 1, background: BRAND, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>BEATRICE<span style={{ color: "#f59e0b", WebkitTextFillColor: "#f59e0b" }}>.</span></div>
@@ -398,12 +407,23 @@ export default function Cockpit({ initialSlug, initialProjectName, dbOk }: { ini
 
       {/* KPI strip */}
       {kpis && (
-        <div className="bt-stagger" style={{ display: "flex", gap: 12, marginTop: 16, alignItems: "stretch" }}>
-          <div className="bt-kpi" style={{ background: `linear-gradient(180deg, rgba(56,189,248,.08), rgba(168,85,247,.05)), ${C.panel2}`, border: `1px solid ${C.lineHi}`, borderRadius: 8, padding: "8px 16px", display: "flex", alignItems: "center", boxShadow: `0 0 34px ${C.glow}` }}><Ring pct={conf} /></div>
-          <Kpi label="CASOS IA ACEPTADOS" value={`${Math.round((kpis.process.aiCases.acceptanceRate || 0) * 100)}%`} sub={`${kpis.process.aiCases.validated}/${kpis.process.aiCases.total} sin corrección`} />
-          <Kpi label="COBERTURA PIRÁMIDE" value={`${Math.round((kpis.process.pyramidCoverage || 0) * 100)}%`} sub="ejecutados / decididos" />
-          <Kpi label="DEFECTOS ESCAPADOS" value={`${kpis.quality.escapedToProd}`} sub={`${kpis.quality.caughtEarly} atrapados temprano`} color={kpis.quality.escapedToProd ? C.reject : C.human} />
-          <Kpi label="COSTO EVITADO" value={`$${Math.round(kpis.business.costAvoidedUsd || 0).toLocaleString()}`} sub={`${(kpis.business.qaHoursSaved || 0).toFixed(1)}h QA`} color={C.human} />
+        <div className="bt-stagger" style={{ display: "flex", gap: 14, marginTop: 18, alignItems: "stretch" }}>
+          <div className="bt-kpi bt-glass" style={{ background: "linear-gradient(150deg, rgba(56,189,248,.14), rgba(168,85,247,.10) 55%, rgba(245,158,11,.06)), rgba(17,21,32,.5)", border: `1px solid ${C.lineHi}`, borderRadius: 16, padding: "18px 28px", display: "flex", alignItems: "center", gap: 20, boxShadow: `0 0 60px rgba(56,189,248,.18)` }}>
+            <Ring pct={conf} />
+            <div>
+              <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: 2, color: C.dim }}>SCORE DE CONFIANZA</div>
+              <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6, maxWidth: 190, lineHeight: 1.35 }}>
+                Un número, auditable, del estado real de calidad.
+              </div>
+              <div style={{ fontFamily: MONO, fontSize: 10, color: C.faint, marginTop: 8 }}>0–100 · calculado en vivo</div>
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, flex: 1 }}>
+            <Kpi Icon={CheckCircle2} label="CASOS IA ACEPTADOS" value={`${Math.round((kpis.process.aiCases.acceptanceRate || 0) * 100)}%`} sub={`${kpis.process.aiCases.validated}/${kpis.process.aiCases.total} sin corrección`} />
+            <Kpi Icon={Layers} label="COBERTURA PIRÁMIDE" value={`${Math.round((kpis.process.pyramidCoverage || 0) * 100)}%`} sub="ejecutados / decididos" />
+            <Kpi Icon={Bug} label="DEFECTOS ESCAPADOS" value={`${kpis.quality.escapedToProd}`} sub={`${kpis.quality.caughtEarly} atrapados temprano`} color={kpis.quality.escapedToProd ? C.reject : C.human} />
+            <Kpi Icon={DollarSign} label="COSTO EVITADO" value={`$${Math.round(kpis.business.costAvoidedUsd || 0).toLocaleString()}`} sub={`${(kpis.business.qaHoursSaved || 0).toFixed(1)}h QA`} color={C.human} />
+          </div>
         </div>
       )}
 
